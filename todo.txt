@@ -1,5 +1,3 @@
-try 3d slice clamping to the actual 3d view again - tried it before, didn't work right. clamping a shape to a container isn't a WebGL function?
-changing the 3d slice still isn't updating the sliders - neither the gradients or adding *'s after the color component names
 
 --------------
 

@@ -369,12 +369,15 @@ select {
 }
 
 .slider-label {
-  width: 40px;
+  width: 58px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-secondary);
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .slider-canvas-wrap {

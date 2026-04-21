@@ -750,23 +750,27 @@ export class ColorSliders {
       this.#scheduleGradientRender();
     };
 
+    // Synchronous render — no RAF, no scheduling, just render immediately.
+    const immediateGradientRender = () => {
+      if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0; }
+      console.log('[Sliders] rotation-changed event → rendering gradients');
+      this.#renderAllGradients();
+    };
+
     this.#unsubs.push(
       state.subscribe('currentColor', () => {
         if (!this.#suppressUpdate) this.#updateFromColor();
       }),
       state.subscribe('activeSpaces', () => this.render()),
-      // Re-render gradients when picker config changes (rotation angles, axis swap,
-      // excludedValue, etc.) so ★ labels and rotated gradient rendering stay in sync
-      // with Shift+drag in 3D view and picker controls.
       state.subscribe('picker', forceGradientRender),
       state.subscribe('picker.rotAngle1', forceGradientRender),
       state.subscribe('picker.rotAngle2', forceGradientRender),
       state.subscribe('picker.excludedValue', forceGradientRender),
     );
 
-    // Direct DOM event — bypasses state subscription system entirely as a
-    // reliable fallback for rotation changes from 3D Shift+drag and sliders
-    document.addEventListener('picker-rotation-changed', forceGradientRender);
+    // Direct DOM event from 3D Shift+drag and rotation sliders — renders
+    // synchronously, bypassing both the state subscription system and RAF
+    document.addEventListener('picker-rotation-changed', immediateGradientRender);
 
     this.render();
   }
@@ -830,6 +834,7 @@ export class ColorSliders {
 
     const canvases = [];
     const inputs = [];
+    const labels = [];
 
     for (let ci = 0; ci < space.components.length; ci++) {
       const comp = space.components[ci];
@@ -837,6 +842,7 @@ export class ColorSliders {
 
       // Label
       const label = el('span', 'slider-label', comp.name);
+      labels.push(label);
       row.appendChild(label);
 
       // Gradient canvas
@@ -890,7 +896,7 @@ export class ColorSliders {
     }
 
     this.#container.appendChild(groupEl);
-    this.#groups.set(spaceId, { el: groupEl, canvases, inputs });
+    this.#groups.set(spaceId, { el: groupEl, canvases, inputs, labels });
   }
 
   #removeGroupDOM(spaceId) {
@@ -1008,13 +1014,15 @@ export class ColorSliders {
     const color = this.#state.get('currentColor');
 
     for (const [spaceId, group] of this.#groups) {
-      let values;
-      if (color.sourceSpace === spaceId) {
-        values = [...color.sourceValues];
-      } else {
-        values = this.#engine.convert(color.xyz, 'xyz', spaceId);
-      }
-      this.#updateInputsForSpace(spaceId, values);
+      try {
+        let values;
+        if (color.sourceSpace === spaceId) {
+          values = [...color.sourceValues];
+        } else {
+          values = this.#engine.convert(color.xyz, 'xyz', spaceId);
+        }
+        this.#updateInputsForSpace(spaceId, values);
+      } catch { /* skip spaces that can't represent this color */ }
     }
 
     this.#scheduleGradientRender();
@@ -1028,7 +1036,8 @@ export class ColorSliders {
 
     for (let ci = 0; ci < space.components.length; ci++) {
       const comp = space.components[ci];
-      const val = values[ci];
+      const val = values[ci] ?? comp.defaultValue ?? 0;
+      if (typeof val !== 'number' || isNaN(val)) continue;
 
       // Update number input
       const step = comp.step;
@@ -1073,9 +1082,13 @@ export class ColorSliders {
         const isRotatedSpace = spaceId === picker.spaceId &&
           (Math.abs(picker.rotAngle1 || 0) > 0.5 || Math.abs(picker.rotAngle2 || 0) > 0.5);
 
+        if (spaceId === picker.spaceId) {
+          console.log(`[Sliders] space=${spaceId} rot1=${picker.rotAngle1} rot2=${picker.rotAngle2} isRotated=${isRotatedSpace}`);
+        }
+
         for (let ci = 0; ci < space.components.length; ci++) {
           // Update label with ★ indicator when rotation is active
-          const labelEl = group.el.querySelectorAll('.slider-label')[ci];
+          const labelEl = group.labels?.[ci];
           if (labelEl) {
             const baseName = space.components[ci].name;
             labelEl.textContent = isRotatedSpace ? baseName + ' ★' : baseName;
@@ -1103,8 +1116,9 @@ export class ColorSliders {
     const comp = space.components[componentIndex];
     const [min, max] = comp.range;
 
-    // Try GPU path first — fall through to CPU if it fails (e.g., context lost)
-    if (this.#sliderGL?.isReady) {
+    // GPU path — but NOT when rotation is active (rotation math isn't in GLSL,
+    // so rotated gradients must use the CPU path below)
+    if (!rotPicker && this.#sliderGL?.isReady) {
       try {
         const ok = this.#sliderGL.renderSliderWithRange(
           ctx, space.id, componentIndex, currentValues,
@@ -1114,11 +1128,6 @@ export class ColorSliders {
       } catch {
         // GPU failed — fall through to CPU
       }
-    }
-
-    // Skip GPU for rotated sliders — CPU only (rotation not in GLSL)
-    if (rotPicker && this.#sliderGL?.isReady) {
-      // Fall through to CPU for rotated rendering
     }
 
     // CPU fallback
@@ -1136,13 +1145,25 @@ export class ColorSliders {
       const xH = (comps[rotPicker.xAxis].range[1] - comps[rotPicker.xAxis].range[0]) / 2;
       const yH = (comps[rotPicker.yAxis].range[1] - comps[rotPicker.yAxis].range[0]) / 2;
       const eH = (comps[rotPicker.excluded].range[1] - comps[rotPicker.excluded].range[0]) / 2;
-      // Which rotated axis does this component's slider correspond to?
+      // Rotated axis vectors in (xAxis, yAxis, excluded) local space
+      const rAxX = [Math.cos(a1) * xH, 0, Math.sin(a1) * eH];
+      const rAxY = [0, Math.cos(a2) * yH, Math.sin(a2) * eH];
       if (componentIndex === rotPicker.xAxis) {
-        rotAxes = [Math.cos(a1) * xH, 0, Math.sin(a1) * eH]; // rotated X
+        rotAxes = rAxX;
       } else if (componentIndex === rotPicker.yAxis) {
-        rotAxes = [0, Math.cos(a2) * yH, Math.sin(a2) * eH]; // rotated Y
+        rotAxes = rAxY;
+      } else {
+        // Excluded axis: sweep along the normal to the rotated plane
+        // normal = cross(rAxX, rAxY) in (xAxis, yAxis, excluded) space
+        const nx = rAxX[1] * rAxY[2] - rAxX[2] * rAxY[1];
+        const ny = rAxX[2] * rAxY[0] - rAxX[0] * rAxY[2];
+        const nz = rAxX[0] * rAxY[1] - rAxX[1] * rAxY[0];
+        // Normalize to half-range magnitude so the gradient spans a meaningful range
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len > 1e-6) {
+          rotAxes = [nx / len * eH, ny / len * eH, nz / len * eH];
+        }
       }
-      // excluded component slider stays standard (perpendicular to the plane)
     }
 
     for (let px = 0; px < w; px++) {
@@ -1413,13 +1434,17 @@ export class ExcludedSlider {
     this.#valueInput.max = comp.range[1];
     this.#valueInput.step = comp.step;
 
+    const exVal = picker.excludedValue ?? comp.defaultValue ?? 0;
     const step = comp.step;
     const decimals = step < 1 ? Math.max(1, -Math.floor(Math.log10(step))) : 0;
-    this.#valueInput.value = picker.excludedValue.toFixed(decimals);
+    this.#valueInput.value = exVal.toFixed(decimals);
 
     // Render gradient
     const color = this.#state.get('currentColor');
-    const currentValues = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+    let currentValues;
+    try {
+      currentValues = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+    } catch { return; }
 
     const w = this.#canvas.width;
     const h = this.#canvas.height;
@@ -2438,31 +2463,26 @@ export class Opponent6D {
 
   #renderAllGradients() {
     for (let i = 0; i < this.#rows.length; i++) {
-      const row = this.#rows[i];
-      const ch = Opponent6D.#CHANNELS[i];
-      const { canvas, ctx } = row;
+      try {
+        const row = this.#rows[i];
+        const { canvas, ctx } = row;
 
-      // Sync canvas resolution with CSS size
-      const cw = canvas.clientWidth || 200;
-      const ch2 = canvas.clientHeight || 20;
-      if (canvas.width !== cw || canvas.height !== ch2) {
-        canvas.width = cw;
-        canvas.height = ch2;
-      }
+        const cw = canvas.clientWidth || 200;
+        const ch2 = canvas.clientHeight || 20;
+        if (canvas.width !== cw || canvas.height !== ch2) {
+          canvas.width = cw;
+          canvas.height = ch2;
+        }
 
-      // Draw a gradient from neutral gray to the channel's color
-      const grad = ctx.createLinearGradient(0, 0, cw, 0);
+        const fromRGB = this.#computeRGBForSliderValue(i, 0);
+        const toRGB = this.#computeRGBForSliderValue(i, 100);
 
-      // For the "from" color, compute the opponent color with this channel at 0
-      // For the "to" color, compute with this channel at 100
-      // This gives a perceptually meaningful gradient
-      const fromRGB = this.#computeRGBForSliderValue(i, 0);
-      const toRGB = this.#computeRGBForSliderValue(i, 100);
-
-      grad.addColorStop(0, `rgb(${fromRGB[0]},${fromRGB[1]},${fromRGB[2]})`);
-      grad.addColorStop(1, `rgb(${toRGB[0]},${toRGB[1]},${toRGB[2]})`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, cw, ch2);
+        const grad = ctx.createLinearGradient(0, 0, cw, 0);
+        grad.addColorStop(0, `rgb(${fromRGB[0]},${fromRGB[1]},${fromRGB[2]})`);
+        grad.addColorStop(1, `rgb(${toRGB[0]},${toRGB[1]},${toRGB[2]})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, cw, ch2);
+      } catch { /* skip broken row */ }
     }
   }
 
@@ -2480,6 +2500,12 @@ export class Opponent6D {
     const br = vals[4];
 
     const opVals = [yb, rg, br];
-    return this.#engine.toSRGB(opVals, 'opponent');
+    try {
+      const rgb = this.#engine.toSRGB(opVals, 'opponent');
+      // Guard against NaN from out-of-gamut conversions
+      return rgb.map(v => isNaN(v) ? 128 : clamp(Math.round(v), 0, 255));
+    } catch {
+      return [128, 128, 128];
+    }
   }
 }

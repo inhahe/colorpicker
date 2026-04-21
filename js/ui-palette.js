@@ -1544,7 +1544,10 @@ export class PaletteEditor {
       return;
     }
 
-    const pickerCanvas = document.getElementById('picker-canvas');
+    // Use the container so we intercept events even when the rotation overlay
+    // or RBF overlay sits on top of the raw canvas element.
+    const pickerCanvas = document.getElementById('picker-canvas-container')
+      || document.getElementById('picker-canvas');
     if (!pickerCanvas) return;
 
     this._drawModeActive = true;
@@ -1636,17 +1639,36 @@ export class PaletteEditor {
       e.preventDefault();
       e.stopPropagation();
       const rect = pickerCanvas.getBoundingClientRect();
-      cursorPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      this._drawPath.push({ ...cursorPt });
+      const newPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 
-      // Mouse movement alone also writes the current index (so it works
-      // without a scroll wheel — one index per unique mouse position)
-      const idx = Math.floor(palIndex);
-      if (idx >= 0 && idx < PALETTE_SIZE) {
-        writeSlot(idx);
+      // Advance palette index by pixel distance traveled (baseline: 1 index
+      // per pixel).  Scroll wheel provides additional fast advancement on top.
+      if (cursorPt) {
+        const dx = newPt.x - cursorPt.x;
+        const dy = newPt.y - cursorPt.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const oldIdx = Math.floor(palIndex);
+        palIndex = Math.min(PALETTE_SIZE, palIndex + dist * 0.5);
+        const newIdx = Math.floor(palIndex);
+        // Fill all slots between old and new
+        for (let i = oldIdx; i <= newIdx && i < PALETTE_SIZE; i++) {
+          // Interpolate position along this segment
+          const frac = dist > 0 ? Math.min(1, (i - oldIdx) / Math.max(1, newIdx - oldIdx)) : 1;
+          const px = cursorPt.x + dx * frac;
+          const py = cursorPt.y + dy * frac;
+          const rgb = getPickerColor(px, py) || [0, 0, 0];
+          const off = i * 3;
+          this.palette[off] = rgb[0];
+          this.palette[off + 1] = rgb[1];
+          this.palette[off + 2] = rgb[2];
+        }
       }
 
+      cursorPt = newPt;
+      this._drawPath.push({ ...cursorPt });
+
       updateIndicator(e);
+      this._markDirty();
       this._drawPathOverlay();
     };
 
