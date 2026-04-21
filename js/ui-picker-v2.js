@@ -1928,6 +1928,8 @@ export class GradientUI {
     // Two-color gradient: click swatches to set from current color
     color1Swatch.addEventListener('click', () => {
       const color = this.#state.get('currentColor');
+      const hex = this.#engine.toHex(color.sourceValues, color.sourceSpace);
+      console.log(`[Gradient] Setting color1 from currentColor: ${hex} (space=${color.sourceSpace}, vals=${color.sourceValues})`);
       this.#color1 = { ...color };
       this.#state.set('gradient.color1', color);
       this.#scheduleRender();
@@ -1967,6 +1969,49 @@ export class GradientUI {
       const { x, y } = canvasPos(triCanvas, evt);
       this.#pickTriangleColor(x, y, triCanvas.width, triCanvas.height);
     });
+
+    // Drop targets: drag a color onto any gradient/triangle swatch
+    const makeDropTarget = (el, setter) => {
+      el.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        el.style.outline = '2px dashed #4a90d9';
+      });
+      el.addEventListener('dragleave', () => { el.style.outline = ''; });
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.style.outline = '';
+        const hex = e.dataTransfer.getData('text/plain');
+        if (hex && /^#?[0-9a-fA-F]{3,6}$/.test(hex.trim())) {
+          try {
+            const parsed = engine.fromHex(hex.trim());
+            const xyz = engine.convert(parsed.values, parsed.spaceId, 'xyz');
+            setter({ xyz, sourceSpace: parsed.spaceId, sourceValues: parsed.values });
+          } catch {}
+        }
+      });
+    };
+
+    makeDropTarget(color1Swatch, (c) => {
+      this.#color1 = c;
+      this.#state.set('gradient.color1', c);
+      this.#scheduleRender();
+    });
+    makeDropTarget(color2Swatch, (c) => {
+      this.#color2 = c;
+      this.#state.set('gradient.color2', c);
+      this.#scheduleRender();
+    });
+    for (let i = 0; i < 3; i++) {
+      makeDropTarget(triSwatches[i], (c) => {
+        this.#triColors[i] = c;
+        const triState = this.#state.get('triangleGradient');
+        const newColors = [...(triState.colors || [null, null, null])];
+        newColors[i] = c;
+        this.#state.set('triangleGradient.colors', newColors);
+        this.#scheduleRender();
+      });
+    }
 
     // Subscribe to state
     this.#unsubs.push(
@@ -2020,19 +2065,26 @@ export class GradientUI {
 
   // -- Private: swatch updates ----------------------------------------------
 
+  #colorToHex(c) {
+    if (!c) return '#888';
+    try {
+      // Use source values to avoid XYZ round-trip precision loss
+      if (c.sourceSpace && c.sourceValues) {
+        return this.#engine.toHex(c.sourceValues, c.sourceSpace);
+      }
+      return this.#engine.toHex(c.xyz, 'xyz');
+    } catch { return '#888'; }
+  }
+
   #updateSwatches() {
     const { color1Swatch, color2Swatch, triSwatches } = this.#elements;
 
-    if (this.#color1) {
-      color1Swatch.style.backgroundColor = this.#engine.toHex(this.#color1.xyz, 'xyz');
-    }
-    if (this.#color2) {
-      color2Swatch.style.backgroundColor = this.#engine.toHex(this.#color2.xyz, 'xyz');
-    }
+    if (this.#color1) color1Swatch.style.backgroundColor = this.#colorToHex(this.#color1);
+    if (this.#color2) color2Swatch.style.backgroundColor = this.#colorToHex(this.#color2);
 
     for (let i = 0; i < 3; i++) {
       if (this.#triColors[i]) {
-        triSwatches[i].style.backgroundColor = this.#engine.toHex(this.#triColors[i].xyz, 'xyz');
+        triSwatches[i].style.backgroundColor = this.#colorToHex(this.#triColors[i]);
       }
     }
   }
@@ -2394,9 +2446,18 @@ export class Opponent6D {
     const yellow = this.#values[2], blue = this.#values[3];
     const white = this.#values[4];
 
-    const rg = (red - green) / 100 * 30;       // maps to [-30, 30]
-    const yb = (yellow - blue) / 100 * 50;     // maps to [-50, 50]
-    const br = white;                            // maps to [0, 100]
+    let rg = (red - green) / 100 * 30;       // maps to [-30, 30]
+    let yb = (yellow - blue) / 100 * 50;     // maps to [-50, 50]
+    const br = white;                          // maps to [0, 100]
+
+    // Clamp chromatic channels so LMS cone values stay non-negative.
+    // L = half + diff/2 >= 0  and  M = half - diff/2 >= 0
+    //   → |diff| <= 2*half  → |rg| <= 2*br (since diff = rg/100, half = br/100)
+    // S = half - yb/100 >= 0  → yb <= br
+    const half = br / 100;
+    const maxDiff = 2 * half;               // max |rg/100|
+    rg = clamp(rg, -maxDiff * 100, maxDiff * 100);
+    yb = Math.min(yb, br);                  // yellow can't exceed brightness
 
     const opponentValues = [yb, rg, br];
     const xyz = this.#engine.convert(opponentValues, 'opponent', 'xyz');
@@ -2500,9 +2561,15 @@ export class Opponent6D {
     if (index === 4) vals[5] = clamp(100 - val, 0, 100);
     if (index === 5) vals[4] = clamp(100 - val, 0, 100);
 
-    const rg = (vals[0] - vals[1]) / 100 * 30;
-    const yb = (vals[2] - vals[3]) / 100 * 50;
+    let rg = (vals[0] - vals[1]) / 100 * 30;
+    let yb = (vals[2] - vals[3]) / 100 * 50;
     const br = vals[4];
+
+    // Clamp so LMS stays non-negative (same as #onSliderChange)
+    const half = br / 100;
+    const maxDiff = 2 * half;
+    rg = clamp(rg, -maxDiff * 100, maxDiff * 100);
+    yb = Math.min(yb, br);
 
     const opVals = [yb, rg, br];
     try {

@@ -1101,13 +1101,18 @@ class App {
         });
       }
 
+      // --- Single-key shortcuts: only fire without Ctrl/Shift/Alt ---
+      // (so they don't interfere with browser shortcuts like Ctrl+Shift+R)
+      if (ctrl || e.altKey) return;
+      const shift = e.shiftKey;
+
       // I → Eyedropper
-      if (e.key === 'i' || e.key === 'I') {
+      if ((e.key === 'i' || e.key === 'I') && !shift) {
         this.eyedropper.pick();
       }
 
       // S → Save current color
-      if (e.key === 's' && !ctrl) {
+      if (e.key === 's' && !shift) {
         const color = this.state.get('currentColor');
         this.state.addSavedColor({
           sourceSpace: color.sourceSpace,
@@ -1136,8 +1141,8 @@ class App {
         }
       }
 
-      // R → Rotate picker axes
-      if (e.key === 'r' || e.key === 'R') {
+      // R → Rotate picker axes (but not Ctrl+Shift+R which is browser reload)
+      if ((e.key === 'r' || e.key === 'R') && !ctrl && !e.shiftKey) {
         const picker = this.state.get('picker');
         const rotation = [
           [0, 1, 2],

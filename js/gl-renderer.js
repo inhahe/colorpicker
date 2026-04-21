@@ -256,7 +256,7 @@ uniform bool u_showGamut;
 
 void main() {
   float tX = u_reverseX ? 1.0 - v_uv.x : v_uv.x;
-  float tY = u_reverseY ? v_uv.y : 1.0 - v_uv.y;  // default: top=max
+  float tY = u_reverseY ? 1.0 - v_uv.y : v_uv.y;
 
   float xVal = mix(u_xMin, u_xMax, tX);
   float yVal = mix(u_yMin, u_yMax, tY);

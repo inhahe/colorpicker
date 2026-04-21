@@ -276,6 +276,7 @@ select {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow-y: auto;
 }
 
 #panel-3dview > #view3d-container {
@@ -536,10 +537,10 @@ select {
   padding: 0 5px;
 }
 
-/* Picker area layout — fills available space */
+/* Picker area layout — fills available space but never crushes below usable size */
 #picker-area {
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
   overflow: hidden;
   display: flex;
   gap: 4px;
