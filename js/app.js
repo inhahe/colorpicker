@@ -75,20 +75,23 @@ class App {
     main.innerHTML = '';
     main.style.cssText = 'display:flex;height:100%;overflow:hidden;';
 
-    // Default: 3 columns. Column 2 has panels stacked vertically.
+    // Default: 3 columns — picker+3D+output | harmony+info+accuracy+saved | sliders
+    // Use proportional widths based on window size so it works on any monitor.
+    const ww = window.innerWidth;
     const defaultLayout = [
-      { width: 220, panels: [{ id: 'panel-sliders', label: 'Color Models' }] },
-      { width: 320, panels: [
-        { id: 'panel-picker', label: '2D Picker' },
-        { id: 'panel-color-output', label: 'Color / Hex / CSS' },
+      { width: Math.round(ww * 0.22), marginLeft: 0, panels: [
+        { id: 'panel-picker', label: '2D Picker', height: 0 },
+        { id: 'panel-3dview', label: '3D View', height: 0 },
+        { id: 'panel-color-output', label: 'Color / Hex / CSS', height: 0 },
       ]},
-      { width: 0,   panels: [
-        { id: 'panel-3dview', label: '3D View' },
-        { id: 'panel-harmony', label: 'Harmony' },
-        { id: 'panel-hexpicker', label: 'Hex Grid' },
-        { id: 'panel-info', label: 'Color Info' },
-        { id: 'panel-accuracy', label: 'Accuracy' },
-        { id: 'panel-saved', label: 'Saved / History' },
+      { width: 0, marginLeft: 0, panels: [ // flex:1 fills remaining space
+        { id: 'panel-harmony', label: 'Harmony', height: 147 },
+        { id: 'panel-info', label: 'Color Info', height: 0 },
+        { id: 'panel-accuracy', label: 'Accuracy', height: 210 },
+        { id: 'panel-saved', label: 'Saved / History', height: 218 },
+      ]},
+      { width: Math.round(ww * 0.28), marginLeft: 0, panels: [
+        { id: 'panel-sliders', label: 'Color Models', height: 0 },
       ]},
     ];
 
