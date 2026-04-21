@@ -8,13 +8,14 @@
 import { ColorEngine } from './color-engine.js';
 import { AppState } from './state.js';
 import { Picker2D, AxisSliders, ColorSliders, ColorSwatch, HexDisplay,
-         ExcludedSlider, PickerControls, Eyedropper, GradientUI } from './ui-picker-v2.js';
+         ExcludedSlider, PickerControls, Eyedropper, GradientUI,
+         Opponent6D } from './ui-picker-v2.js';
 import { InfoPanel, AccuracyMeters } from './ui-info.js';
 import { SavedColorsUI, CollectionsUI } from './collections.js';
 import { PaletteEditor } from './ui-palette.js';
 import { ColorHarmony } from './ui-harmony.js';
 import { ColorSpace3D } from './ui-3d-v2.js';
-import { ColorOutput } from './ui-output.js';
+import { ColorOutput, CSS_NAMED } from './ui-output.js';
 import { HexPicker } from './ui-hex-picker.js';
 import { RBFGradient } from './ui-rbf-gradient.js';
 import { ICCManager } from './ui-icc.js';
@@ -55,6 +56,7 @@ class App {
     this._initToolbar();
     this._initKeyboardShortcuts();
     this._initQuickColors();
+    this._initColorNameSearch();
     this._initDragDrop();
     this._initSpacePickerDialog();
 
@@ -652,6 +654,9 @@ class App {
       this.engine
     );
 
+    // --- 6D Opponent sliders ---
+    this.opponent6d = new Opponent6D($('opponent-6d'), this.state, this.engine);
+
     // --- Current color swatch ---
     this.swatch = new ColorSwatch(
       $('swatch-actual'),
@@ -725,7 +730,7 @@ class App {
         descriptionEl: $('info-description'),
         equationsEl: $('info-equations-content'),
         gamutEl: $('info-gamut-content'),
-        spaceSelect: $('info-space-select'),
+        spaceLabel: $('info-space-label'),
       },
       this.state,
       this.engine
@@ -791,7 +796,9 @@ class App {
       $('contrast-info'),
       $('nearest-name'),
       this.state,
-      this.engine
+      this.engine,
+      $('cvd-sim'),
+      $('color-temp')
     );
 
     // --- Palette editor ---
@@ -865,6 +872,50 @@ class App {
         this.state.set('activeSpaces', allSpaces);
         this._renderAll();
       }
+    });
+
+    // Export Session
+    $('btn-export-session')?.addEventListener('click', () => {
+      const state = this.state.snapshot();
+      const json = JSON.stringify(state, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `colorpicker-session-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Import Session
+    $('btn-import-session')?.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.style.display = 'none';
+      input.addEventListener('change', () => {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const data = JSON.parse(reader.result);
+            this.state.loadFromSnapshot(data);
+            // Re-ensure all color spaces are active (same as constructor)
+            const allSpaces = Array.from(this.engine.spaces.keys()).filter(s => s !== 'xyz');
+            this.state.set('availableSpaces', allSpaces);
+            this.state.set('activeSpaces', allSpaces);
+            this._renderAll();
+          } catch (err) {
+            console.error('Failed to import session:', err);
+            alert('Failed to import session: ' + err.message);
+          }
+        };
+        reader.readAsText(file);
+      });
+      document.body.appendChild(input);
+      input.click();
+      document.body.removeChild(input);
     });
 
     // Palette Editor toggle
@@ -1011,15 +1062,40 @@ class App {
         navigator.clipboard?.writeText(hex);
       }
 
-      // Ctrl+V → Paste hex
+      // Ctrl+V → Paste image (extract palette) or hex color
       if (ctrl && e.key === 'v') {
         e.preventDefault();
-        navigator.clipboard?.readText().then(text => {
-          const parsed = this.engine.fromHex(text?.trim());
-          if (parsed) {
-            this._setColorFromSpace(parsed.values, parsed.spaceId);
+        // Try image paste first (for palette extraction)
+        navigator.clipboard?.read?.().then(items => {
+          for (const item of items) {
+            const imageType = item.types.find(t => t.startsWith('image/'));
+            if (imageType) {
+              item.getType(imageType).then(blob => {
+                createImageBitmap(blob).then(bmp => {
+                  if (this.paletteEditor) {
+                    this.paletteEditor._extractPaletteFromImage(bmp);
+                  }
+                });
+              });
+              return;
+            }
           }
-        }).catch(() => {});
+          // No image found — fall back to text paste (hex color)
+          navigator.clipboard?.readText().then(text => {
+            const parsed = this.engine.fromHex(text?.trim());
+            if (parsed) {
+              this._setColorFromSpace(parsed.values, parsed.spaceId);
+            }
+          }).catch(() => {});
+        }).catch(() => {
+          // clipboard.read() not available — fall back to text paste
+          navigator.clipboard?.readText().then(text => {
+            const parsed = this.engine.fromHex(text?.trim());
+            if (parsed) {
+              this._setColorFromSpace(parsed.values, parsed.spaceId);
+            }
+          }).catch(() => {});
+        });
       }
 
       // I → Eyedropper
@@ -1075,6 +1151,80 @@ class App {
           'picker.yAxis': next[2],
         });
       }
+
+      // C → Complement color (rotate hue 180°)
+      if (e.key === 'c' && !ctrl) {
+        this._setComplement();
+      }
+
+      // N → Random color
+      if (e.key === 'n' || e.key === 'N') {
+        const r = Math.floor(Math.random() * 256);
+        const g = Math.floor(Math.random() * 256);
+        const b = Math.floor(Math.random() * 256);
+        this._setColorFromSpace([r, g, b], 'srgb');
+      }
+
+      // X → Swap X and Y axes
+      if (e.key === 'x' || e.key === 'X') {
+        const picker = this.state.get('picker');
+        this.state.batch({
+          'picker.xAxis': picker.yAxis,
+          'picker.yAxis': picker.xAxis,
+        });
+      }
+
+      // E → Eyedropper (alias for I)
+      if (e.key === 'e' || e.key === 'E') {
+        this.eyedropper.pick();
+      }
+
+      // V → Invert color (RGB: 255-R, 255-G, 255-B)
+      if (e.key === 'v' && !ctrl) {
+        const color = this.state.get('currentColor');
+        const rgb = this.engine.convert(color.xyz, 'xyz', 'srgb');
+        const inverted = [255 - rgb[0], 255 - rgb[1], 255 - rgb[2]];
+        this._setColorFromSpace(inverted, 'srgb');
+      }
+
+      // D → Desaturate to grayscale (set HSB saturation to 0)
+      if (e.key === 'd' || e.key === 'D') {
+        const color = this.state.get('currentColor');
+        const hsb = this.engine.convert(color.xyz, 'xyz', 'hsb');
+        hsb[1] = 0;
+        this._setColorFromSpace(hsb, 'hsb');
+      }
+
+      // L → Lighter (increase HSB brightness by 10, capped at 100)
+      if (e.key === 'l' || e.key === 'L') {
+        const color = this.state.get('currentColor');
+        const hsb = this.engine.convert(color.xyz, 'xyz', 'hsb');
+        hsb[2] = Math.min(100, hsb[2] + 10);
+        this._setColorFromSpace(hsb, 'hsb');
+      }
+
+      // K → Darker (decrease HSB brightness by 10, min 0)
+      if (e.key === 'k' || e.key === 'K') {
+        const color = this.state.get('currentColor');
+        const hsb = this.engine.convert(color.xyz, 'xyz', 'hsb');
+        hsb[2] = Math.max(0, hsb[2] - 10);
+        this._setColorFromSpace(hsb, 'hsb');
+      }
+    });
+  }
+
+  /**
+   * Set the current color to its HSB complement (hue + 180°).
+   */
+  _setComplement() {
+    const color = this.state.get('currentColor');
+    const hsb = this.engine.convert(color.xyz, 'xyz', 'hsb');
+    hsb[0] = (hsb[0] + 180) % 360;
+    const xyz = this.engine.convert(hsb, 'hsb', 'xyz');
+    this.state.set('currentColor', {
+      xyz,
+      sourceSpace: 'hsb',
+      sourceValues: hsb,
     });
   }
 
@@ -1101,6 +1251,47 @@ class App {
           e.dataTransfer.effectAllowed = 'copy';
         }
       });
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Color name search — type a CSS color name to jump to that color
+  // --------------------------------------------------------------------------
+
+  _initColorNameSearch() {
+    const nameSearch = document.getElementById('color-name-search');
+    if (!nameSearch) return;
+
+    // Build a <datalist> for browser-native autocomplete
+    const datalist = document.createElement('datalist');
+    datalist.id = 'color-names-list';
+    for (const name of Object.keys(CSS_NAMED)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      datalist.appendChild(opt);
+    }
+    document.body.appendChild(datalist);
+    nameSearch.setAttribute('list', 'color-names-list');
+
+    nameSearch.addEventListener('change', () => {
+      const query = nameSearch.value.trim().toLowerCase().replace(/\s+/g, '');
+      if (!query) return;
+
+      // Exact match
+      const exact = CSS_NAMED[query];
+      if (exact) {
+        this._setColorFromSpace([...exact], 'srgb');
+        nameSearch.value = query;
+        return;
+      }
+
+      // Partial / substring match — pick the first hit
+      const matches = Object.keys(CSS_NAMED).filter(n => n.includes(query));
+      if (matches.length > 0) {
+        const rgb = CSS_NAMED[matches[0]];
+        this._setColorFromSpace([...rgb], 'srgb');
+        nameSearch.value = matches[0];
+      }
     });
   }
 

@@ -275,12 +275,36 @@ export class PaletteEditor {
     // Canvas mouse interactions
     this.el.canvas.addEventListener('mousedown', (e) => this._onCanvasMouseDown(e));
     this.el.canvas.addEventListener('contextmenu', (e) => this._onCanvasContextMenu(e));
-    // Hover cursor
+
+    // Hover tooltip
+    const tooltip = document.createElement('div');
+    tooltip.className = 'palette-tooltip';
+    tooltip.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;padding:3px 7px;border-radius:3px;font:10px/1.3 monospace;background:rgba(0,0,0,0.75);color:#fff;display:none;white-space:nowrap;';
+    document.body.appendChild(tooltip);
+    this._tooltip = tooltip;
+
+    // Hover cursor + tooltip update
     this.el.canvas.addEventListener('mousemove', (e) => {
       if (this._dragIndex >= 0) return; // during drag, document handles it
       const idx = this._xToIndex(e);
       const cpIdx = this._findControlPoint(idx);
       this.el.canvas.style.cursor = cpIdx >= 0 ? 'grab' : 'pointer';
+
+      // Update tooltip content and position
+      const actualIdx = (idx + this.rotation) % PALETTE_SIZE;
+      const off = actualIdx * 3;
+      const r = this.palette[off], g = this.palette[off + 1], b = this.palette[off + 2];
+      tooltip.innerHTML =
+        `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;border:1px solid rgba(255,255,255,0.4);vertical-align:middle;margin-right:4px;background:rgb(${r},${g},${b})"></span>` +
+        `#${actualIdx} rgb(${r}, ${g}, ${b})`;
+      tooltip.style.display = '';
+      tooltip.style.left = (e.clientX + 12) + 'px';
+      tooltip.style.top = (e.clientY - 28) + 'px';
+    });
+
+    // Hide tooltip when the cursor leaves the canvas
+    this.el.canvas.addEventListener('mouseleave', () => {
+      if (this._tooltip) this._tooltip.style.display = 'none';
     });
 
     // Buttons
@@ -321,6 +345,18 @@ export class PaletteEditor {
       this._imageWidth = 0;
       this._imageHeight = 0;
       if (this._imageContainer) this._imageContainer.classList.remove('has-image');
+    });
+
+    this._imageCanvas?.addEventListener('click', (e) => {
+      if (!this._imageCtx || !this._imageWidth || !this._imageHeight) return;
+      const rect = this._imageCanvas.getBoundingClientRect();
+      const sx = this._imageCanvas.width / rect.width;
+      const sy = this._imageCanvas.height / rect.height;
+      const x = Math.floor((e.clientX - rect.left) * sx);
+      const y = Math.floor((e.clientY - rect.top) * sy);
+      const [r, g, b] = this._imageCtx.getImageData(x, y, 1, 1).data;
+      const xyz = this.engine.convert([r, g, b], 'srgb', 'xyz');
+      this.state.set('currentColor', { xyz, sourceSpace: 'srgb', sourceValues: [r, g, b] });
     });
 
     $('btn-palette-hue-minus')?.addEventListener('click', () => this.shiftHue(-30));
@@ -1520,6 +1556,16 @@ export class PaletteEditor {
     // Change cursor and add drawing listeners
     pickerCanvas.style.cursor = 'crosshair';
     let drawing = false;
+    let palIndex = 0;      // current palette write position (float)
+    let cursorPt = null;    // latest mouse position for color sampling
+
+    // Floating indicator shows current palette index
+    const rateIndicator = document.createElement('div');
+    rateIndicator.style.cssText =
+      'position:fixed;pointer-events:none;z-index:10000;' +
+      'padding:2px 6px;border-radius:3px;font:11px/1.2 monospace;' +
+      'background:rgba(0,0,0,0.55);color:#fff;white-space:nowrap;display:none;';
+    document.body.appendChild(rateIndicator);
 
     const getPickerColor = (x, y) => {
       // Map CSS coords to color values using the picker's current config
@@ -1549,14 +1595,40 @@ export class PaletteEditor {
       return this.engine.toSRGB(values, picker.spaceId);
     };
 
+    /** Write the color at cursorPt to palette index idx. */
+    const writeSlot = (idx) => {
+      if (idx < 0 || idx >= PALETTE_SIZE || !cursorPt) return;
+      const rgb = getPickerColor(cursorPt.x, cursorPt.y) || [0, 0, 0];
+      const off = idx * 3;
+      this.palette[off]     = rgb[0];
+      this.palette[off + 1] = rgb[1];
+      this.palette[off + 2] = rgb[2];
+    };
+
+    const updateIndicator = (e) => {
+      const idx = Math.max(0, Math.min(Math.floor(palIndex), PALETTE_SIZE - 1));
+      rateIndicator.textContent = `${idx}/${PALETTE_SIZE}`;
+      rateIndicator.style.left = (e.clientX + 16) + 'px';
+      rateIndicator.style.top = (e.clientY - 20) + 'px';
+    };
+
     const onDown = (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       drawing = true;
       this._drawPath = [];
+      palIndex = 0;
       const rect = pickerCanvas.getBoundingClientRect();
-      this._drawPath.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      cursorPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      this._drawPath.push(cursorPt);
+
+      // Write the first palette entry
+      writeSlot(0);
+      palIndex = 1;
+
+      rateIndicator.style.display = 'block';
+      updateIndicator(e);
     };
 
     const onMove = (e) => {
@@ -1564,12 +1636,46 @@ export class PaletteEditor {
       e.preventDefault();
       e.stopPropagation();
       const rect = pickerCanvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      this._drawPath.push({ x, y });
+      cursorPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      this._drawPath.push({ ...cursorPt });
 
-      // Draw the path on the picker canvas using a 2D overlay
+      // Mouse movement alone also writes the current index (so it works
+      // without a scroll wheel — one index per unique mouse position)
+      const idx = Math.floor(palIndex);
+      if (idx >= 0 && idx < PALETTE_SIZE) {
+        writeSlot(idx);
+      }
+
+      updateIndicator(e);
       this._drawPathOverlay();
+    };
+
+    const onWheel = (e) => {
+      if (!drawing) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Scroll wheel directly advances / retreats the palette index.
+      // deltaY magnitude is typically 100 for one notch (pixel mode) or 3
+      // for line mode, so normalize to roughly 1-4 indices per notch.
+      const raw = e.deltaMode === 1 ? e.deltaY * 8 : e.deltaY; // line→pixel
+      const advance = raw / 25;  // ~4 indices per wheel notch
+      const oldIdx = Math.floor(palIndex);
+      palIndex = Math.max(0, Math.min(PALETTE_SIZE, palIndex + advance));
+      const newIdx = Math.floor(palIndex);
+
+      // Fill every slot between old and new position with the color under
+      // the cursor — forward or backward.
+      if (cursorPt) {
+        const lo = Math.min(oldIdx, newIdx);
+        const hi = Math.max(oldIdx, newIdx);
+        for (let i = lo; i <= hi && i < PALETTE_SIZE; i++) {
+          writeSlot(i);
+        }
+        this._markDirty();
+      }
+
+      updateIndicator(e);
     };
 
     const onUp = (e) => {
@@ -1578,46 +1684,28 @@ export class PaletteEditor {
       e.preventDefault();
       e.stopPropagation();
 
+      rateIndicator.style.display = 'none';
+
       if (this._drawPath.length < 2) return;
 
-      // Convert the path to 256 evenly-spaced palette entries
-      // First, compute cumulative arc length
-      const arcLengths = [0];
-      for (let i = 1; i < this._drawPath.length; i++) {
-        const dx = this._drawPath[i].x - this._drawPath[i - 1].x;
-        const dy = this._drawPath[i].y - this._drawPath[i - 1].y;
-        arcLengths.push(arcLengths[i - 1] + Math.sqrt(dx * dx + dy * dy));
-      }
-      const totalLen = arcLengths[arcLengths.length - 1];
-      if (totalLen < 1) return;
-
-      // Sample 256 points along the path at equal arc-length intervals
-      for (let i = 0; i < PALETTE_SIZE; i++) {
-        const targetLen = (i / (PALETTE_SIZE - 1)) * totalLen;
-
-        // Find the segment containing this arc length
-        let segIdx = 0;
-        for (let s = 1; s < arcLengths.length; s++) {
-          if (arcLengths[s] >= targetLen) { segIdx = s - 1; break; }
+      // Palette entries up to floor(palIndex) were filled in real-time.
+      // Fill any remaining entries (palIndex..255) by repeating the last
+      // color that was written during movement.
+      const filledCount = Math.min(Math.floor(palIndex), PALETTE_SIZE);
+      if (filledCount > 0 && filledCount < PALETTE_SIZE) {
+        const lastOff = (filledCount - 1) * 3;
+        const lr = this.palette[lastOff];
+        const lg = this.palette[lastOff + 1];
+        const lb = this.palette[lastOff + 2];
+        for (let i = filledCount; i < PALETTE_SIZE; i++) {
+          const off = i * 3;
+          this.palette[off]     = lr;
+          this.palette[off + 1] = lg;
+          this.palette[off + 2] = lb;
         }
-
-        const segStart = arcLengths[segIdx];
-        const segEnd = arcLengths[segIdx + 1] || segStart;
-        const t = segEnd > segStart ? (targetLen - segStart) / (segEnd - segStart) : 0;
-
-        const p0 = this._drawPath[segIdx];
-        const p1 = this._drawPath[segIdx + 1] || p0;
-        const x = p0.x + (p1.x - p0.x) * t;
-        const y = p0.y + (p1.y - p0.y) * t;
-
-        const rgb = getPickerColor(x, y) || [0, 0, 0];
-        const off = i * 3;
-        this.palette[off]     = rgb[0];
-        this.palette[off + 1] = rgb[1];
-        this.palette[off + 2] = rgb[2];
       }
 
-      // Set control points from the sampled palette
+      // Set control points from the filled palette
       const cpCount = 12;
       this.controlPoints = [];
       for (let i = 0; i < cpCount; i++) {
@@ -1637,11 +1725,14 @@ export class PaletteEditor {
     pickerCanvas.addEventListener('mousedown', onDown, true);
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseup', onUp, true);
+    pickerCanvas.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
     this._drawCleanup = () => {
       pickerCanvas.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('mousemove', onMove, true);
       document.removeEventListener('mouseup', onUp, true);
+      pickerCanvas.removeEventListener('wheel', onWheel, true);
+      rateIndicator.remove();
       pickerCanvas.style.cursor = '';
     };
   }
@@ -2942,6 +3033,10 @@ export class PaletteEditor {
     if (this._animTimer) {
       clearInterval(this._animTimer);
       this._animTimer = null;
+    }
+    if (this._tooltip) {
+      this._tooltip.remove();
+      this._tooltip = null;
     }
   }
 }

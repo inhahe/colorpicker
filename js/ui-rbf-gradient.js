@@ -181,6 +181,14 @@ export class RBFGradient {
   #dragIndex = -1;
   #isDragging = false;
 
+  // Save/Load UI elements
+  /** @type {HTMLButtonElement|null} */
+  #saveButton = null;
+  /** @type {HTMLSelectElement|null} */
+  #loadSelect = null;
+  /** @type {HTMLButtonElement|null} */
+  #deleteButton = null;
+
   // Bound handlers (for removal)
   #boundMouseDown = null;
   #boundMouseMove = null;
@@ -196,6 +204,9 @@ export class RBFGradient {
 
     // Create the toggle button and insert it into picker controls
     this.#createButton();
+
+    // Create save/load buttons
+    this.#createSaveLoadButtons();
 
     // Create the overlay canvas for data-point markers
     this.#createOverlay();
@@ -299,6 +310,8 @@ export class RBFGradient {
       const picker = this.#state.get('picker');
       this.#state.set('picker', { ...picker });
     }
+
+    this.#updateSaveLoadVisibility();
   }
 
   /** @deprecated — use toggle() */
@@ -329,6 +342,188 @@ export class RBFGradient {
     }
 
     this.#button = btn;
+  }
+
+  #createSaveLoadButtons() {
+    const pickerControls = document.getElementById('picker-controls');
+    if (!pickerControls) return;
+
+    // ---- Save button ----
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'btn-rbf-save';
+    saveBtn.className = 'small-btn';
+    saveBtn.title = 'Save current RBF gradient configuration';
+    saveBtn.textContent = 'Save';
+    saveBtn.style.display = 'none';
+    saveBtn.addEventListener('click', () => this.#onSave());
+
+    // ---- Load dropdown ----
+    const loadSelect = document.createElement('select');
+    loadSelect.id = 'sel-rbf-load';
+    loadSelect.className = 'small-btn';
+    loadSelect.title = 'Load a saved RBF gradient';
+    loadSelect.style.display = 'none';
+    loadSelect.style.maxWidth = '100px';
+    loadSelect.addEventListener('change', () => this.#onLoad());
+
+    // ---- Delete button ----
+    const deleteBtn = document.createElement('button');
+    deleteBtn.id = 'btn-rbf-delete';
+    deleteBtn.className = 'small-btn';
+    deleteBtn.title = 'Delete the selected saved RBF gradient';
+    deleteBtn.textContent = 'Del';
+    deleteBtn.style.display = 'none';
+    deleteBtn.addEventListener('click', () => this.#onDelete());
+
+    // Insert after the RBF toggle button
+    if (this.#button && this.#button.nextSibling) {
+      pickerControls.insertBefore(deleteBtn, this.#button.nextSibling);
+      pickerControls.insertBefore(loadSelect, this.#button.nextSibling);
+      pickerControls.insertBefore(saveBtn, this.#button.nextSibling);
+    } else {
+      pickerControls.appendChild(saveBtn);
+      pickerControls.appendChild(loadSelect);
+      pickerControls.appendChild(deleteBtn);
+    }
+
+    this.#saveButton = saveBtn;
+    this.#loadSelect = loadSelect;
+    this.#deleteButton = deleteBtn;
+
+    this.#refreshLoadDropdown();
+  }
+
+  /** Update save/load button visibility based on current mode and points. */
+  #updateSaveLoadVisibility() {
+    const hasPoints = this.#points.length > 0;
+    const showSave = (this.#mode === 'edit' || this.#mode === 'use') && hasPoints;
+
+    if (this.#saveButton) {
+      this.#saveButton.style.display = showSave ? '' : 'none';
+    }
+
+    const savedGradients = this.#state.get('rbfGradients') || [];
+    const showLoad = savedGradients.length > 0;
+
+    if (this.#loadSelect) {
+      this.#loadSelect.style.display = showLoad ? '' : 'none';
+    }
+    if (this.#deleteButton) {
+      this.#deleteButton.style.display = showLoad ? '' : 'none';
+    }
+  }
+
+  /** Rebuild the load dropdown options from saved state. */
+  #refreshLoadDropdown() {
+    if (!this.#loadSelect) return;
+
+    const savedGradients = this.#state.get('rbfGradients') || [];
+    this.#loadSelect.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Load...';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    this.#loadSelect.appendChild(placeholder);
+
+    for (let i = 0; i < savedGradients.length; i++) {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = savedGradients[i].name || `Gradient ${i + 1}`;
+      this.#loadSelect.appendChild(opt);
+    }
+
+    this.#updateSaveLoadVisibility();
+  }
+
+  /** Save current points + picker config to state. */
+  #onSave() {
+    if (this.#points.length === 0) return;
+
+    const name = window.prompt('Name for this RBF gradient:');
+    if (name === null) return; // cancelled
+
+    const picker = this.#state.get('picker');
+    const entry = {
+      name: name.trim() || `Gradient ${Date.now()}`,
+      points: this.#points.map(p => ({
+        x: p.x,
+        y: p.y,
+        color: [...p.color],
+      })),
+      picker: {
+        spaceId: picker.spaceId,
+        xAxis: picker.xAxis,
+        yAxis: picker.yAxis,
+        excluded: picker.excluded,
+        excludedValue: picker.excludedValue,
+      },
+    };
+
+    const saved = this.#state.get('rbfGradients') || [];
+    saved.push(entry);
+    this.#state.set('rbfGradients', saved);
+
+    this.#refreshLoadDropdown();
+  }
+
+  /** Load a saved gradient: restore points + picker config, enter "use" mode. */
+  #onLoad() {
+    const sel = this.#loadSelect;
+    if (!sel || sel.value === '') return;
+
+    const index = parseInt(sel.value, 10);
+    const saved = this.#state.get('rbfGradients') || [];
+    if (index < 0 || index >= saved.length) return;
+
+    const entry = saved[index];
+
+    // Restore picker config
+    const currentPicker = this.#state.get('picker');
+    this.#state.set('picker', {
+      ...currentPicker,
+      spaceId: entry.picker.spaceId,
+      xAxis: entry.picker.xAxis,
+      yAxis: entry.picker.yAxis,
+      excluded: entry.picker.excluded,
+      excludedValue: entry.picker.excludedValue,
+    });
+
+    // Restore control points
+    this.#points = entry.points.map(p => ({
+      x: p.x,
+      y: p.y,
+      color: [...p.color],
+    }));
+
+    // Recompute RBF weights and enter "use" mode
+    this.#invalidateCache();
+    this.#recompute();
+    this.#setMode('use');
+
+    // Reset dropdown to placeholder
+    sel.selectedIndex = 0;
+
+    this.#updateSaveLoadVisibility();
+  }
+
+  /** Delete the currently selected saved gradient. */
+  #onDelete() {
+    const sel = this.#loadSelect;
+    if (!sel || sel.value === '') return;
+
+    const index = parseInt(sel.value, 10);
+    const saved = this.#state.get('rbfGradients') || [];
+    if (index < 0 || index >= saved.length) return;
+
+    const name = saved[index].name;
+    if (!window.confirm(`Delete saved gradient "${name}"?`)) return;
+
+    saved.splice(index, 1);
+    this.#state.set('rbfGradients', saved);
+
+    this.#refreshLoadDropdown();
   }
 
   #createOverlay() {
@@ -427,6 +622,7 @@ export class RBFGradient {
       this.#recompute();
       this.#renderGradient();
       this.#renderOverlay();
+      this.#updateSaveLoadVisibility();
     }
 
     // Attach move/up to document for dragging
@@ -487,6 +683,7 @@ export class RBFGradient {
       this.#recompute();
       this.#renderGradient();
       this.#renderOverlay();
+      this.#updateSaveLoadVisibility();
     }
   }
 
@@ -517,6 +714,7 @@ export class RBFGradient {
       this.#recompute();
       this.#renderGradient();
       this.#renderOverlay();
+      this.#updateSaveLoadVisibility();
     } catch {
       // Invalid hex -- ignore
     }

@@ -744,15 +744,29 @@ export class ColorSliders {
       if (!this.#sliderGL.init()) this.#sliderGL = null;
     } catch { this.#sliderGL = null; }
 
+    const forceGradientRender = () => {
+      // Cancel any pending RAF so we don't render stale state
+      if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0; }
+      this.#scheduleGradientRender();
+    };
+
     this.#unsubs.push(
       state.subscribe('currentColor', () => {
         if (!this.#suppressUpdate) this.#updateFromColor();
       }),
       state.subscribe('activeSpaces', () => this.render()),
-      // Re-render gradients when picker config changes (rotation angles, axis swap, etc.)
-      // so ★ labels and rotated gradient rendering stay in sync with Shift+drag in 3D view
-      state.subscribe('picker', () => this.#scheduleGradientRender()),
+      // Re-render gradients when picker config changes (rotation angles, axis swap,
+      // excludedValue, etc.) so ★ labels and rotated gradient rendering stay in sync
+      // with Shift+drag in 3D view and picker controls.
+      state.subscribe('picker', forceGradientRender),
+      state.subscribe('picker.rotAngle1', forceGradientRender),
+      state.subscribe('picker.rotAngle2', forceGradientRender),
+      state.subscribe('picker.excludedValue', forceGradientRender),
     );
+
+    // Direct DOM event — bypasses state subscription system entirely as a
+    // reliable fallback for rotation changes from 3D Shift+drag and sliders
+    document.addEventListener('picker-rotation-changed', forceGradientRender);
 
     this.render();
   }
@@ -1532,9 +1546,11 @@ export class PickerControls {
     // Rotation sliders
     if (rot1) rot1.addEventListener('input', () => {
       this.#state.set('picker.rotAngle1', parseFloat(rot1.value));
+      document.dispatchEvent(new Event('picker-rotation-changed'));
     });
     if (rot2) rot2.addEventListener('input', () => {
       this.#state.set('picker.rotAngle2', parseFloat(rot2.value));
+      document.dispatchEvent(new Event('picker-rotation-changed'));
     });
 
     // Rotation: draw a line on the picker to set rotation direction
@@ -2176,5 +2192,294 @@ export class GradientUI {
       sourceSpace: 'lab',
       sourceValues: labMix,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  10. Opponent6D — Six-dimensional color opponent sliders
+// ---------------------------------------------------------------------------
+
+export class Opponent6D {
+  #container;
+  #state;
+  #engine;
+  #unsubs = [];
+  #suppressUpdate = false;
+  #rafId = 0;
+
+  // Slider definitions: label, CSS gradient color, and which opponent axis
+  static #CHANNELS = [
+    { id: 'red',    label: 'Red',    color: [255, 0, 0] },
+    { id: 'green',  label: 'Green',  color: [0, 180, 0] },
+    { id: 'yellow', label: 'Yellow', color: [230, 210, 0] },
+    { id: 'blue',   label: 'Blue',   color: [0, 60, 255] },
+    { id: 'white',  label: 'White',  color: [255, 255, 255] },
+    { id: 'black',  label: 'Black',  color: [0, 0, 0] },
+  ];
+
+  // Each slider row: { canvas, thumb, ctx, input }
+  #rows = [];
+  // Current 6D values (0-100 each)
+  #values = [0, 0, 0, 0, 50, 50];
+
+  constructor(containerEl, state, engine) {
+    this.#container = containerEl;
+    this.#state = state;
+    this.#engine = engine;
+
+    this.#buildDOM();
+
+    this.#unsubs.push(
+      state.subscribe('currentColor', () => {
+        if (!this.#suppressUpdate) this.#updateFromColor();
+      })
+    );
+
+    this.#updateFromColor();
+  }
+
+  // -- DOM construction -------------------------------------------------------
+
+  #buildDOM() {
+    const groupEl = el('div', 'slider-group');
+    groupEl.dataset.spaceId = 'opponent-6d';
+
+    // Header
+    const header = el('div', 'slider-group-header');
+    const title = el('span', 'slider-group-title', '6D Opponent');
+    header.appendChild(title);
+    groupEl.appendChild(header);
+
+    for (let i = 0; i < Opponent6D.#CHANNELS.length; i++) {
+      const ch = Opponent6D.#CHANNELS[i];
+      const row = el('div', 'slider-row');
+
+      // Label
+      const label = el('span', 'slider-label', ch.label);
+      row.appendChild(label);
+
+      // Gradient canvas
+      const cvs = document.createElement('canvas');
+      cvs.className = 'slider-canvas';
+      cvs.width = 200;
+      cvs.height = 20;
+
+      const thumbOverlay = el('div', 'slider-thumb-overlay');
+      const thumb = el('div', 'slider-thumb');
+      thumbOverlay.appendChild(thumb);
+
+      const canvasWrap = el('div', 'slider-canvas-wrap');
+      canvasWrap.appendChild(cvs);
+      canvasWrap.appendChild(thumbOverlay);
+
+      // Drag interaction
+      this.#attachSliderDrag(canvasWrap, cvs, i);
+
+      row.appendChild(canvasWrap);
+
+      // Number input
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'num-input slider-num-input';
+      input.min = 0;
+      input.max = 100;
+      input.step = 0.5;
+      input.addEventListener('change', () => {
+        this.#onSliderChange(i, parseFloat(input.value));
+      });
+      row.appendChild(input);
+
+      groupEl.appendChild(row);
+
+      this.#rows.push({
+        canvas: cvs,
+        thumb,
+        ctx: cvs.getContext('2d'),
+        input,
+      });
+    }
+
+    this.#container.appendChild(groupEl);
+  }
+
+  // -- Drag handling ----------------------------------------------------------
+
+  #attachSliderDrag(wrap, canvas, index) {
+    const startDrag = (evt) => {
+      evt.preventDefault();
+      const pick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const x = clamp(clientX - rect.left, 0, rect.width);
+        const t = x / (rect.width || canvas.width);
+        const val = t * 100;
+        this.#onSliderChange(index, val);
+      };
+      pick(evt);
+
+      const onMove = (e) => { e.preventDefault(); pick(e); };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onUp);
+    };
+
+    wrap.addEventListener('mousedown', startDrag);
+    wrap.addEventListener('touchstart', (e) => { e.preventDefault(); startDrag(e); }, { passive: false });
+  }
+
+  // -- Slider change → recompose to opponent → XYZ → state -------------------
+
+  #onSliderChange(index, rawValue) {
+    const val = clamp(rawValue, 0, 100);
+    this.#values[index] = val;
+
+    // Enforce linked pairs: changing one zeroes its opposite
+    // Pairs: Red(0)-Green(1), Yellow(2)-Blue(3), White(4)-Black(5)
+    const pairMap = { 0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4 };
+    const pairIdx = pairMap[index];
+
+    if (index < 4) {
+      // For R/G and Y/B pairs: increasing one side decreases the other proportionally
+      // But we allow both to be nonzero only when the user explicitly sets them
+      // Simple rule: if we're increasing, reduce the pair
+      if (val > 0 && this.#values[pairIdx] > 0) {
+        // Both positive — reduce the pair to maintain the net difference
+        this.#values[pairIdx] = Math.max(0, this.#values[pairIdx] - val);
+        if (this.#values[pairIdx] < 0.5) this.#values[pairIdx] = 0;
+      }
+    } else {
+      // White/Black are complementary: W + K = 100
+      this.#values[pairIdx] = clamp(100 - val, 0, 100);
+    }
+
+    // Recompose to 3-channel opponent space
+    const red = this.#values[0], green = this.#values[1];
+    const yellow = this.#values[2], blue = this.#values[3];
+    const white = this.#values[4];
+
+    const rg = (red - green) / 100 * 30;       // maps to [-30, 30]
+    const yb = (yellow - blue) / 100 * 50;     // maps to [-50, 50]
+    const br = white;                            // maps to [0, 100]
+
+    const opponentValues = [yb, rg, br];
+    const xyz = this.#engine.convert(opponentValues, 'opponent', 'xyz');
+
+    this.#suppressUpdate = true;
+    this.#state.set('currentColor', {
+      xyz,
+      sourceSpace: 'opponent',
+      sourceValues: opponentValues,
+    });
+    this.#suppressUpdate = false;
+
+    // Update UI immediately
+    this.#updateInputs();
+    this.#scheduleGradientRender();
+  }
+
+  // -- Update from external color change --------------------------------------
+
+  #updateFromColor() {
+    const color = this.#state.get('currentColor');
+    if (!color || !color.xyz) return;
+
+    // Convert to opponent space
+    let opVals;
+    if (color.sourceSpace === 'opponent') {
+      opVals = [...color.sourceValues];
+    } else {
+      opVals = this.#engine.convert(color.xyz, 'xyz', 'opponent');
+    }
+
+    const [yb, rg, br] = opVals;
+
+    // Decompose into 6 uni-polar values (0-100)
+    this.#values[0] = clamp(Math.max(0, rg) / 30 * 100, 0, 100);   // Red
+    this.#values[1] = clamp(Math.max(0, -rg) / 30 * 100, 0, 100);  // Green
+    this.#values[2] = clamp(Math.max(0, yb) / 50 * 100, 0, 100);   // Yellow
+    this.#values[3] = clamp(Math.max(0, -yb) / 50 * 100, 0, 100);  // Blue
+    this.#values[4] = clamp(br, 0, 100);                             // White
+    this.#values[5] = clamp(100 - br, 0, 100);                      // Black
+
+    this.#updateInputs();
+    this.#scheduleGradientRender();
+  }
+
+  #updateInputs() {
+    for (let i = 0; i < this.#rows.length; i++) {
+      const row = this.#rows[i];
+      const val = this.#values[i];
+      row.input.value = val.toFixed(1);
+
+      // Update thumb position
+      const t = val / 100;
+      const cssW = row.canvas.clientWidth || row.canvas.width;
+      const px = clamp(t * cssW, 0, cssW);
+      row.thumb.style.left = `${px}px`;
+    }
+  }
+
+  // -- Gradient rendering -----------------------------------------------------
+
+  #scheduleGradientRender() {
+    if (this.#rafId) return;
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = 0;
+      this.#renderAllGradients();
+    });
+  }
+
+  #renderAllGradients() {
+    for (let i = 0; i < this.#rows.length; i++) {
+      const row = this.#rows[i];
+      const ch = Opponent6D.#CHANNELS[i];
+      const { canvas, ctx } = row;
+
+      // Sync canvas resolution with CSS size
+      const cw = canvas.clientWidth || 200;
+      const ch2 = canvas.clientHeight || 20;
+      if (canvas.width !== cw || canvas.height !== ch2) {
+        canvas.width = cw;
+        canvas.height = ch2;
+      }
+
+      // Draw a gradient from neutral gray to the channel's color
+      const grad = ctx.createLinearGradient(0, 0, cw, 0);
+
+      // For the "from" color, compute the opponent color with this channel at 0
+      // For the "to" color, compute with this channel at 100
+      // This gives a perceptually meaningful gradient
+      const fromRGB = this.#computeRGBForSliderValue(i, 0);
+      const toRGB = this.#computeRGBForSliderValue(i, 100);
+
+      grad.addColorStop(0, `rgb(${fromRGB[0]},${fromRGB[1]},${fromRGB[2]})`);
+      grad.addColorStop(1, `rgb(${toRGB[0]},${toRGB[1]},${toRGB[2]})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, cw, ch2);
+    }
+  }
+
+  /** Compute the sRGB color if slider `index` were set to `val`, keeping others fixed. */
+  #computeRGBForSliderValue(index, val) {
+    const vals = [...this.#values];
+    vals[index] = val;
+
+    // Apply pair constraint for W/K
+    if (index === 4) vals[5] = clamp(100 - val, 0, 100);
+    if (index === 5) vals[4] = clamp(100 - val, 0, 100);
+
+    const rg = (vals[0] - vals[1]) / 100 * 30;
+    const yb = (vals[2] - vals[3]) / 100 * 50;
+    const br = vals[4];
+
+    const opVals = [yb, rg, br];
+    return this.#engine.toSRGB(opVals, 'opponent');
   }
 }

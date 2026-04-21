@@ -33,12 +33,12 @@
           <path d="M19 5H7a5 5 0 0 0 0 10h8"/>
         </svg>
       </button>
-    </div>
-    <div class="toolbar-right">
       <button id="btn-gradient-tool" class="tool-btn" title="Two-color gradient (G)">Gradient</button>
       <button id="btn-triangle-tool" class="tool-btn" title="Three-color triangle (T)">Triangle</button>
       <button id="btn-load-icc" class="tool-btn" title="Load ICC/ICM profile">ICC Profile</button>
       <button id="btn-clean-slate" class="tool-btn" title="Reset to defaults">Clean Slate</button>
+      <button id="btn-export-session" class="tool-btn" title="Export session as JSON">Export</button>
+      <button id="btn-import-session" class="tool-btn" title="Import session from JSON">Import</button>
       <button id="btn-palette-editor" class="tool-btn" title="Open palette editor">Palette Editor</button>
     </div>
   </header>
@@ -50,6 +50,7 @@
   <div id="panel-sliders" style="display:none">
     <div class="panel-header"><span>Color Models</span><button id="btn-add-space" class="small-btn" title="Add color model">+</button></div>
     <div id="slider-groups"></div>
+    <div id="opponent-6d"></div>
   </div>
   <div id="panel-picker" style="display:none">
     <div id="picker-controls">
@@ -117,7 +118,7 @@
   <div id="panel-3dview" style="display:none"><div id="view3d-container"></div></div>
   <div id="panel-harmony" style="display:none"><div id="harmony-container"></div></div>
   <div id="panel-info" style="display:none">
-    <div class="panel-header" style="padding:0;height:auto;border:none;justify-content:flex-start;gap:6px;"><span>Color Info</span><select id="info-space-select" title="Show info for this color model"></select></div>
+    <div class="panel-header" style="padding:0;height:auto;border:none;justify-content:flex-start;gap:6px;"><span>Color Info</span><span id="info-space-label" style="font-size:11px;color:var(--text-dim,#888);"></span></div>
     <div id="info-content">
       <div id="info-description" class="info-section"></div>
       <div id="info-equations" class="info-section"><h3>Equations</h3><div id="info-equations-content"></div></div>
@@ -166,6 +167,11 @@
       <div id="css-formats"></div>
       <div id="contrast-info"></div>
       <div id="nearest-name"></div>
+      <div id="color-name-search-container" style="margin:4px 0;">
+        <input id="color-name-search" type="text" placeholder="Search color name..." class="hex-input" style="width:120px;font-size:10px;text-align:left;">
+      </div>
+      <div id="color-temp"></div>
+      <div id="cvd-sim"></div>
     </div>
     <div id="quick-colors">
       <button class="quick-btn" data-color="#000000" title="Black" style="background:#000"></button>

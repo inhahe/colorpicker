@@ -526,19 +526,21 @@ export class ConeResponseChart {
 // ---------------------------------------------------------------------------
 
 export class InfoPanel {
-  /** @type {{descriptionEl: HTMLElement, equationsEl: HTMLElement, gamutEl: HTMLElement, spaceSelect: HTMLSelectElement}} */
+  /** @type {{descriptionEl: HTMLElement, equationsEl: HTMLElement, gamutEl: HTMLElement, spaceLabel: HTMLElement}} */
   #els;
   /** @type {AppState} */
   #state;
   /** @type {ColorEngine} */
   #engine;
+  /** @type {string} */
+  #spaceId = 'srgb';
   /** @type {ChromaticityDiagram|null} */
   #diagram = null;
   /** @type {HTMLCanvasElement|null} */
   #diagramCanvas = null;
 
   /**
-   * @param {{descriptionEl: HTMLElement, equationsEl: HTMLElement, gamutEl: HTMLElement, spaceSelect: HTMLSelectElement}} elements
+   * @param {{descriptionEl: HTMLElement, equationsEl: HTMLElement, gamutEl: HTMLElement, spaceLabel: HTMLElement}} elements
    * @param {AppState} state
    * @param {ColorEngine} engine
    */
@@ -547,46 +549,41 @@ export class InfoPanel {
     this.#state = state;
     this.#engine = engine;
 
-    this.#populateSelect();
+    // Sync from picker state (single source of truth for active space)
+    this.#spaceId = this.#state.get('picker.spaceId') || 'srgb';
+    this.#updateLabel();
 
-    // Sync select from state
-    const initial = this.#state.get('infoPanel.selectedSpace') || 'srgb';
-    this.#els.spaceSelect.value = initial;
-
-    // Listen for user selection changes
-    this.#els.spaceSelect.addEventListener('change', () => {
-      this.#state.set('infoPanel.selectedSpace', this.#els.spaceSelect.value);
-      this.render();
-    });
-
-    // Listen for state-driven changes (e.g. from other UI)
-    this.#state.subscribe('infoPanel.selectedSpace', (newVal) => {
-      if (this.#els.spaceSelect.value !== newVal) {
-        this.#els.spaceSelect.value = newVal;
+    // Follow picker state changes from any source
+    // Subscribe to 'picker' (not 'picker.spaceId') because PickerControls replaces
+    // the whole object via state.set('picker', {...}).
+    this.#state.subscribe('picker', () => {
+      const newVal = this.#state.get('picker.spaceId');
+      if (newVal && newVal !== this.#spaceId) {
+        this.#spaceId = newVal;
+        this.#updateLabel();
+        this.render();
       }
-      this.render();
     });
 
     // Also re-render when currentColor changes (for the chromaticity point)
     this.#state.subscribe('currentColor', () => {
       this.render();
     });
+
+    // Initial render
+    this.render();
   }
 
-  /** Populate the space-select dropdown with all known spaces. */
-  #populateSelect() {
-    this.#els.spaceSelect.innerHTML = '';
-    for (const [id, space] of this.#engine.spaces) {
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = space.name;
-      this.#els.spaceSelect.appendChild(opt);
-    }
+  /** Update the space name label. */
+  #updateLabel() {
+    if (!this.#els.spaceLabel) return;
+    const space = this.#engine.spaces.get(this.#spaceId);
+    this.#els.spaceLabel.textContent = space ? `(${space.name})` : '';
   }
 
   /** Render the info panel for the currently selected space. */
   render() {
-    const spaceId = this.#els.spaceSelect.value || 'srgb';
+    const spaceId = this.#spaceId;
     const space = this.#engine.spaces.get(spaceId);
     if (!space) return;
 

@@ -240,7 +240,6 @@ select {
   grid-area: toolbar;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: var(--toolbar-height);
   padding: 0 10px;
   background: linear-gradient(180deg, #1e1e3a 0%, #16213e 100%);
@@ -248,11 +247,11 @@ select {
   z-index: 100;
 }
 
-.toolbar-left,
-.toolbar-right {
+.toolbar-left {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .app-title {
@@ -1129,6 +1128,46 @@ select {
 .nearest-label {
   font-size: 10px;
   color: var(--text-secondary);
+}
+
+/* Correlated color temperature */
+#color-temp {
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cct-warm { color: #f0a040; }
+.cct-neutral { color: #e0e0e0; }
+.cct-cool { color: #60a0f0; }
+
+/* Color vision deficiency simulation */
+#cvd-sim {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.cvd-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.cvd-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cvd-label {
+  font-size: 9px;
+  color: var(--text-dim);
 }
 
 /* Color history */

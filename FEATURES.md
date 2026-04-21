@@ -17,6 +17,13 @@
 
 All conversions route through XYZ. The 2D picker and sliders work with every model. Multi-column layout when the panel is wide enough.
 
+### 6D Color Opponent Sliders
+Six uni-polar sliders decomposing the 3-channel opponent model into intuitive dimensions:
+- **Red** / **Green** — linked pair (increasing one decreases the other)
+- **Yellow** / **Blue** — linked pair
+- **White** / **Black** — linked pair (strict complements: W + K = 100)
+- Gradient canvases show the actual color at each slider position
+
 ## 2D Color Picker
 
 - **GPU-accelerated** via WebGL fragment shaders (CPU fallback if WebGL unavailable)
@@ -32,6 +39,7 @@ All conversions route through XYZ. The 2D picker and sliders work with every mod
   - **Shift+drag in the 3D viewer** also rotates the slice plane interactively
   - The 3D viewer shows a **semi-transparent slice plane** visualization (tessellated for cylindrical spaces like HSB/HSL/LCh)
 - **RBF gradient mode** — click "RBF" to place arbitrary color points, the entire 2D surface is filled via thin-plate spline radial basis function interpolation
+  - **Save/Load** RBF gradient configurations (stores control points + picker config, persists in localStorage)
 - Keyboard: **R** to rotate axes
 
 ## Hexagonal Color Picker
@@ -53,13 +61,16 @@ A flat-top hexagonal grid of color swatches in its own panel:
 
 ## Color / Hex / CSS Panel
 
-- **Swatch** — split diagonally: top-left = displayed sRGB, bottom-right = intended color. Draggable.
+- **Swatch** — split diagonally: top-left = displayed sRGB, bottom-right = intended color. Draggable as a color source.
 - **Hex input** — type or paste hex values (#RGB or #RRGGBB)
-- **Copy/Paste buttons** — clipboard integration
+- **Copy/Paste buttons** — clipboard integration (Ctrl+V also accepts images for palette extraction)
 - **Quick color buttons** — black, white, R, G, B, Y, M, C (clickable and draggable)
-- **CSS formats** — HEX, RGB, HSL, LAB — each click-to-copy with green flash
+- **CSS formats** — HEX, RGB, HSL, HSB, LAB, LCH — each click-to-copy with green flash
 - **WCAG contrast checker** — contrast ratios against white and black text with AAA/AA/Fail ratings
 - **Nearest named color** — closest CSS named color with swatch
+- **Color name search** — type a color name (e.g. "coral", "darkblue") with browser autocomplete from all 148 CSS named colors
+- **Color vision deficiency simulation** — shows how the current color appears to people with protanopia (no red cones), deuteranopia (no green cones), and tritanopia (no blue cones), using Brettel/Viénot simulation matrices
+- **Correlated Color Temperature** — McCamy's approximation showing CCT in Kelvin with Warm/Neutral/Cool classification
 
 ## Saved Colors / History / Collections Panel
 
@@ -69,8 +80,8 @@ A flat-top hexagonal grid of color swatches in its own panel:
 
 ## Color Harmony
 
-Shows harmony suggestions that update live:
-- Complementary, Split Complementary, Triadic, Tetradic Square, Tetradic Rectangular, Analogous
+Shows harmony suggestions that update live (9 types):
+- Complementary, Split Complementary, Triadic, Tetradic Square, Tetradic Rectangular, Analogous, Split-Complement, Square, Double-Complement
 - Each swatch is clickable and draggable. "Save All" adds all to saved colors.
 
 ## Two-Color Gradient
@@ -84,6 +95,7 @@ Toggle via **Triangle** button or **T** key. Barycentric interpolation in L\*a\*
 ## Color Info Panel
 
 - Color model description, key equations, gamut coverage, uniformity rating
+- Space label synced with the 2D picker (all panels share one model selector)
 - CIE xy chromaticity diagram with gamut triangles
 - Cone response chart (L/M/S curves, 380-780nm)
 - Display accuracy meters (Delta E 2000, HSB, LMS groups)
@@ -112,7 +124,7 @@ Click the **Eyedropper** button or press **I**. Uses the EyeDropper API (Chrome/
 
 ## Palette Editor
 
-Toggle via **Palette Editor** button in toolbar.
+Toggle via **Palette Editor** button in toolbar. Hovering over the palette strip shows a tooltip with the palette index and RGB values.
 
 ### Creating Palettes
 - **New** — cycles through presets: Rainbow, Grayscale, Heat, Cool, Random
@@ -120,11 +132,14 @@ Toggle via **Palette Editor** button in toolbar.
 - **From Image** — median cut quantization (Heckbert 1982) extracts 256 representative colors
 - **From Saved** — creates a palette from saved colors via spline interpolation
 - **Curves** — draw R/G/B or H/S/B curves in a curves dialog with control points
-- **Preview Image** — loads an image and maps it to palette indices for cycling preview
+- **Preview Image** — loads an image and maps it to palette indices for cycling preview; **click any pixel** to pick that color
 
 ### Shape Drawing on 2D Picker
 Dropdown with 5 shape modes:
-- **Freehand** — draw freely, colors sampled along the path
+- **Freehand** — draw freely on the 2D picker, palette entries filled in real-time
+  - **Scroll wheel** directly advances/retreats through palette indices — faster scrolling = faster advancement, reverse scrolling = go backward
+  - Mouse position determines what color gets written; scroll wheel controls which palette index
+  - Floating indicator near cursor shows current position (e.g. "42/256")
 - **Line** — click two points, colors sampled along the line
 - **Rectangle** — click two corners, colors sampled around the perimeter
 - **Ellipse** — click center + drag radius, colors sampled around circumference
@@ -172,13 +187,15 @@ Interactive WebGL visualization of any color space:
 - **Axis labels**: component names for cubes, cardinal hue angles for cylinders
 - **Current color marker** (glowing white point)
 - **Drag** to rotate, **scroll** to zoom
-- **Dropdown** to switch color space
+- **Space label** shows current color model (synced with 2D picker — all panels share one model selector)
 - **Palette** button — shows current palette as a 3D trace
+- **History** button — shows a trace of the last 200 picked colors as a continuous line through color space (re-projects when space changes)
 - **Image** button — load an image to show its color distribution (persists across space changes, x to clear)
 - **Dual** checkbox — renders two color spaces side by side with labels
 - **Perspective slider** — smoothly blends between orthographic (0) and perspective (1) projection
 - **Shift+drag** — rotates the 2D picker's slice plane angles interactively
 - **Slice plane visualization** — semi-transparent blue quad showing the current 2D picker slice; tessellated for cylindrical spaces so it follows the surface curvature
+- **sRGB gamut boundary** — when viewing wide-gamut spaces (Lab, LCh, XYZ, LMS, Opponent), a dim orange wireframe shows the sRGB gamut edges so you can see which colors are displayable
 - **Stereo 3D modes**: Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Blue/Amber, Cross-eyed, Parallel
 
 ## Panel Layout
@@ -196,9 +213,16 @@ Interactive WebGL visualization of any color space:
 | Ctrl+Z | Undo |
 | Ctrl+Y / Ctrl+Shift+Z | Redo |
 | Ctrl+C | Copy hex to clipboard |
-| Ctrl+V | Paste hex from clipboard |
-| I | Eyedropper |
+| Ctrl+V | Paste hex from clipboard, or paste image to extract palette |
+| I / E | Eyedropper (pick color from screen) |
 | S | Save current color |
+| C | Complement color (hue + 180°) |
+| N | Random color |
+| X | Swap X and Y axes |
+| V | Invert color (255-R, 255-G, 255-B) |
+| D | Desaturate to grayscale |
+| L | Lighter (+10 brightness) |
+| K | Darker (-10 brightness) |
 | G | Toggle two-color gradient |
 | T | Toggle three-color triangle |
 | R | Rotate picker axes |
@@ -208,18 +232,24 @@ Interactive WebGL visualization of any color space:
 - All settings, saved colors, and palettes persist via localStorage
 - **Clean Slate** resets to defaults but preserves saved colors and palettes
 - **Undo/Redo** stack (max 100 entries) for color and picker changes
+- **Export Session** — download the entire session as a JSON file
+- **Import Session** — restore a previously exported session from JSON
 - Corrupted state (zero XYZ) auto-detected and reset on load
 
 ## Technical
 
-- **16,000+ lines** of pure HTML/CSS/JS — zero external dependencies, no build tools
-- 16 ES modules: app, color-engine, state, gl-renderer, ui-picker, ui-3d, ui-palette, ui-harmony, ui-hex-picker, ui-rbf-gradient, ui-icc, ui-info, ui-output, collections
+- **21,000+ lines** of pure HTML/CSS/JS — zero external dependencies, no build tools
+- 16 ES modules: app, color-engine, state, gl-renderer, ui-picker-v2, ui-3d-v2, ui-palette, ui-harmony, ui-hex-picker, ui-rbf-gradient, ui-icc, ui-info, ui-output, collections
 - ES modules loaded natively by the browser
 - WebGL fragment shaders for GPU-accelerated 2D picker and slider rendering
 - All 10 color space conversions implemented in both JavaScript and GLSL
 - Full CIEDE2000 Delta E implementation
+- Brettel/Viénot color vision deficiency simulation matrices
+- McCamy's correlated color temperature approximation
 - Stockman & Sharpe cone fundamentals (89 data points, 390-830nm)
 - CIE 1931 color matching functions (81 data points, 380-780nm)
+- Median cut quantization (Heckbert 1982) for image palette extraction
+- Thin-plate spline RBF for 2D gradient extrapolation
 - Custom drag-and-drop panel layout system (no framework)
 - No-cache development server (server.py)
 - Dark theme with CSS custom properties

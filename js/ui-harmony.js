@@ -21,10 +21,14 @@ const HARMONIES = {
   square:         { label: 'Tetradic (Square)',     offsets: [90, 180, 270] },
   rectangular:    { label: 'Tetradic (Rectangular)',offsets: [60, 180, 240] },
   analogous:      { label: 'Analogous',             offsets: [-60, -30, 30, 60] },
+  splitComplement:{ label: 'Split-Complement',      offsets: [150, -150] },
+  squareEven:     { label: 'Square',                offsets: [90, 180, 270] },
+  doubleComplement:{ label: 'Double-Complement',    offsets: [30, 180, 210] },
 };
 
 const HARMONY_ORDER = [
   'complementary', 'split', 'triadic', 'square', 'rectangular', 'analogous',
+  'splitComplement', 'squareEven', 'doubleComplement',
 ];
 
 // ---------------------------------------------------------------------------

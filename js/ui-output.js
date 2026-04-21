@@ -12,7 +12,7 @@ import { AppState } from './state.js';
 //  CSS named colors for nearest-color matching (subset: the 148 CSS colors)
 // ---------------------------------------------------------------------------
 
-const CSS_NAMED = {
+export const CSS_NAMED = {
   aliceblue:[240,248,255],antiquewhite:[250,235,215],aqua:[0,255,255],aquamarine:[127,255,212],
   azure:[240,255,255],beige:[245,245,220],bisque:[255,228,196],black:[0,0,0],
   blanchedalmond:[255,235,205],blue:[0,0,255],blueviolet:[138,43,226],brown:[165,42,42],
@@ -54,6 +54,50 @@ const CSS_NAMED = {
 };
 
 // ---------------------------------------------------------------------------
+//  Color vision deficiency simulation (Brettel/Viénot)
+//
+//  Each matrix transforms linear sRGB to simulate how the color appears
+//  to someone lacking one cone type.
+// ---------------------------------------------------------------------------
+
+/** Protanopia — no L (long-wave / red) cones. */
+const CVD_PROTAN = [
+  [0.152286, 1.052583, -0.204868],
+  [0.114503, 0.786281,  0.099216],
+  [-0.003882, -0.048116, 1.051998],
+];
+/** Deuteranopia — no M (medium-wave / green) cones. */
+const CVD_DEUTAN = [
+  [0.367322, 0.860646, -0.227968],
+  [0.280085, 0.672501,  0.047413],
+  [-0.011820, 0.042940, 0.968881],
+];
+/** Tritanopia — no S (short-wave / blue) cones. */
+const CVD_TRITAN = [
+  [1.255528, -0.076749, -0.178779],
+  [-0.078411, 0.930809, 0.147602],
+  [0.004733, 0.691367, 0.303900],
+];
+
+function simulateCVD(r, g, b, matrix) {
+  // sRGB -> linear
+  const lin = [r / 255, g / 255, b / 255].map(c =>
+    c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  );
+  // Apply CVD matrix
+  const out = [
+    matrix[0][0] * lin[0] + matrix[0][1] * lin[1] + matrix[0][2] * lin[2],
+    matrix[1][0] * lin[0] + matrix[1][1] * lin[1] + matrix[1][2] * lin[2],
+    matrix[2][0] * lin[0] + matrix[2][1] * lin[1] + matrix[2][2] * lin[2],
+  ];
+  // linear -> sRGB
+  return out.map(c => {
+    c = Math.max(0, Math.min(1, c));
+    return Math.round((c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
+  });
+}
+
+// ---------------------------------------------------------------------------
 //  WCAG relative luminance and contrast ratio
 // ---------------------------------------------------------------------------
 
@@ -78,6 +122,28 @@ function wcagLevel(ratio) {
 }
 
 // ---------------------------------------------------------------------------
+//  Correlated Color Temperature (McCamy 1992)
+// ---------------------------------------------------------------------------
+
+/**
+ * Approximate correlated color temperature (CCT) in Kelvin from CIE XYZ.
+ * Uses McCamy's cubic approximation (1992) from CIE xy chromaticity.
+ * Returns null if the color is too far from the Planckian locus.
+ */
+function approximateCCT(X, Y, Z) {
+  const sum = X + Y + Z;
+  if (sum < 1e-6) return null;
+  const x = X / sum;
+  const y = Y / sum;
+  // McCamy's approximation: n = (x - 0.3320) / (0.1858 - y)
+  const n = (x - 0.3320) / (0.1858 - y);
+  const cct = 449 * n * n * n + 3525 * n * n + 6823.3 * n + 5520.33;
+  // Only valid roughly 1000K - 40000K and near the Planckian locus
+  if (cct < 1000 || cct > 40000) return null;
+  return Math.round(cct);
+}
+
+// ---------------------------------------------------------------------------
 //  ColorOutput class
 // ---------------------------------------------------------------------------
 
@@ -85,15 +151,19 @@ export class ColorOutput {
   #formatsEl;
   #contrastEl;
   #nameEl;
+  #cvdEl;
+  #tempEl;
   #state;
   #engine;
   #unsubs = [];
   #rafId = 0;
 
-  constructor(formatsEl, contrastEl, nameEl, state, engine) {
+  constructor(formatsEl, contrastEl, nameEl, state, engine, cvdEl, tempEl) {
     this.#formatsEl = formatsEl;
     this.#contrastEl = contrastEl;
     this.#nameEl = nameEl;
+    this.#cvdEl = cvdEl || null;
+    this.#tempEl = tempEl || null;
     this.#state = state;
     this.#engine = engine;
 
@@ -126,12 +196,17 @@ export class ColorOutput {
       hsb = [0, 0, 0]; hsl = [0, 0, 0]; lab = [0, 0, 0];
     }
 
+    let lch;
+    try { lch = this.#engine.convert(color.xyz, 'xyz', 'lch'); } catch { lch = [0, 0, 0]; }
+
     // --- CSS Formats ---
     const formats = [
       { label: 'HEX', value: hex },
       { label: 'RGB', value: `rgb(${r}, ${g}, ${b})` },
       { label: 'HSL', value: `hsl(${Math.round(hsl[0])}, ${Math.round(hsl[1])}%, ${Math.round(hsl[2])}%)` },
+      { label: 'HSB', value: `hsb(${Math.round(hsb[0])}, ${Math.round(hsb[1])}%, ${Math.round(hsb[2])}%)` },
       { label: 'LAB', value: `lab(${lab[0].toFixed(1)}% ${lab[1].toFixed(1)} ${lab[2].toFixed(1)})` },
+      { label: 'LCH', value: `lch(${lch[0].toFixed(1)}% ${lch[1].toFixed(1)} ${Math.round(lch[2])})` },
     ];
 
     this.#formatsEl.innerHTML = formats.map(f =>
@@ -180,5 +255,33 @@ export class ColorOutput {
     this.#nameEl.innerHTML =
       `<span class="nearest-swatch" style="background:${nearestHex};" title="${nearestHex}"></span>` +
       `<span class="nearest-label">${exact ? '' : '~'}${bestName}</span>`;
+
+    // --- Color temperature ---
+    if (this.#tempEl) {
+      const cct = approximateCCT(color.xyz[0], color.xyz[1], color.xyz[2]);
+      if (cct !== null) {
+        const warmCool = cct < 3500 ? 'Warm' : cct < 5000 ? 'Neutral' : 'Cool';
+        const warmClass = cct < 3500 ? 'warm' : cct < 5000 ? 'neutral' : 'cool';
+        this.#tempEl.innerHTML = `<span class="cct-${warmClass}">${cct}K</span> <span style="color:var(--text-dim)">${warmCool}</span>`;
+      } else {
+        this.#tempEl.textContent = '';
+      }
+    }
+
+    // --- Color Vision Deficiency simulation ---
+    if (this.#cvdEl) {
+      const sims = [
+        { label: 'Protan', matrix: CVD_PROTAN, desc: 'No red cones' },
+        { label: 'Deutan', matrix: CVD_DEUTAN, desc: 'No green cones' },
+        { label: 'Tritan', matrix: CVD_TRITAN, desc: 'No blue cones' },
+      ];
+      this.#cvdEl.innerHTML = sims.map(s => {
+        const [sr, sg, sb] = simulateCVD(r, g, b, s.matrix);
+        const sHex = '#' + [sr, sg, sb].map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase();
+        return `<span class="cvd-item" title="${s.desc}">` +
+          `<span class="cvd-swatch" style="background:${sHex};"></span>` +
+          `<span class="cvd-label">${s.label}</span></span>`;
+      }).join('');
+    }
   }
 }

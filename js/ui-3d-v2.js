@@ -223,6 +223,11 @@ const CYLINDER_SPACES = {
 };
 
 
+// Spaces where the sRGB gamut boundary should be shown as a secondary wireframe.
+// These spaces encompass colors outside sRGB, so showing the sRGB boundary helps
+// the user see which colors are displayable.
+const SRGB_GAMUT_SPACES = new Set(['lab', 'lch', 'xyz', 'lms', 'opponent']);
+
 /**
  * Convert a color space value to 3D position.
  * For cylindrical spaces: hue → angle, radius → distance from Y axis, height → Y.
@@ -305,7 +310,7 @@ export class ColorSpace3D {
   #root = null;
   #canvas = null;
   #labelCanvas = null;
-  #select = null;
+  #spaceLabel = null;
 
   // WebGL
   #gl = null;
@@ -322,6 +327,7 @@ export class ColorSpace3D {
   #cloudVAO = null;     // {posBuf, colBuf, count}
   #markerVAO = null;    // {posBuf, colBuf, count}
   #traceVAO = null;     // {posBuf, colBuf, count}
+  #gamutWireVAO = null; // {posBuf, colBuf, count} — sRGB gamut boundary in wide-gamut spaces
 
   // Camera state
   #rotX = -0.5;   // initial tilt
@@ -343,6 +349,11 @@ export class ColorSpace3D {
 
   // Palette trace data
   #tracePoints = null;
+
+  // History trace data (recently picked colors)
+  #historyTrace = [];      // array of {xyz: number[]} — XYZ values of last 200 picks
+  #historyVAO = null;      // {posBuf, colBuf, count}
+  #showHistoryTrace = false;
 
   // Dual-space mode
   #dualMode = false;
@@ -377,16 +388,15 @@ export class ColorSpace3D {
     this.#initInteraction();
     this.#initSubscriptions();
 
-    // Populate the dropdowns
-    this.#populateSpaceSelect();
+    // Populate the dual-space dropdown
     this.#populateDualSelect();
 
     // Default to picker space
     const pickerSpace = state.get('picker.spaceId');
     if (pickerSpace && engine.spaces.has(pickerSpace)) {
       this.#spaceId = pickerSpace;
-      this.#select.value = pickerSpace;
     }
+    this.#updateSpaceLabel();
 
     // Initial point cloud generation + render (defer to let layout settle)
     this.#rebuildCloud();
@@ -441,16 +451,11 @@ export class ColorSpace3D {
     const label = document.createElement('span');
     label.textContent = '3D View';
 
-    const select = document.createElement('select');
-    select.className = 'view3d-space-select';
-    select.addEventListener('change', () => {
-      this.#spaceId = select.value;
-      this.#rebuildCloud();
-      this.#updateMarker();
-      this.#updateTrace();
-      this.#markDirty();
-    });
-    this.#select = select;
+    // Space label — shows current space name, driven by picker state
+    const spaceLabel = document.createElement('span');
+    spaceLabel.className = 'view3d-space-label';
+    spaceLabel.style.cssText = 'font-size:11px;color:var(--text-dim,#888);margin-left:6px;';
+    this.#spaceLabel = spaceLabel;
 
     // Density slider
     const densityWrap = document.createElement('label');
@@ -526,7 +531,7 @@ export class ColorSpace3D {
     this.#imageLabel = { container: imageIndicator, name: imageNameSpan };
 
     header.appendChild(label);
-    header.appendChild(select);
+    header.appendChild(spaceLabel);
     header.appendChild(imageIndicator);
 
     // Controls row
@@ -545,6 +550,19 @@ export class ColorSpace3D {
     palBtn.title = 'Show current palette as a 3D trace';
     palBtn.style.cssText = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
     palBtn.addEventListener('click', () => this.#showPaletteTrace());
+
+    // History trace button
+    const histBtn = document.createElement('button');
+    histBtn.textContent = 'History';
+    histBtn.title = 'Toggle color pick history trace in 3D';
+    histBtn.style.cssText = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
+    histBtn.addEventListener('click', () => {
+      this.#showHistoryTrace = !this.#showHistoryTrace;
+      histBtn.style.background = this.#showHistoryTrace ? '#3a5a3a' : '#252545';
+      histBtn.style.borderColor = this.#showHistoryTrace ? '#5a8a5a' : '#3a3a5a';
+      if (this.#showHistoryTrace) this.#updateHistoryTrace();
+      this.#markDirty();
+    });
 
     // Dual-space checkbox + secondary space dropdown
     const dualLabel = document.createElement('label');
@@ -601,6 +619,7 @@ export class ColorSpace3D {
     controls.appendChild(stereoSelect);
     controls.appendChild(imgBtn);
     controls.appendChild(palBtn);
+    controls.appendChild(histBtn);
     controls.appendChild(dualLabel);
     controls.appendChild(dualSelect);
 
@@ -678,6 +697,7 @@ export class ColorSpace3D {
       this.#rebuildCloud();
       this.#updateMarker();
       this.#updateTrace();
+      if (this.#showHistoryTrace) this.#updateHistoryTrace();
       this.#markDirty();
     });
 
@@ -881,6 +901,75 @@ export class ColorSpace3D {
       this.#updateVAO(this.#cubeVAO, wf.positions, wf.colors, wf.count);
     } else {
       this.#cubeVAO = this.#createVAO(wf.positions, wf.colors, wf.count);
+    }
+
+    // Build sRGB gamut boundary overlay for wide-gamut spaces
+    this.#buildGamutBoundary();
+  }
+
+  /**
+   * Build sRGB gamut boundary wireframe for wide-gamut spaces.
+   * Samples the 12 edges of the sRGB cube (0-255), converts each sample
+   * to the current space, and creates a LINES VAO showing the boundary
+   * as a dim orange wireframe.
+   */
+  #buildGamutBoundary() {
+    this.#gamutWireVAO = null;
+    if (!SRGB_GAMUT_SPACES.has(this.#spaceId)) return;
+
+    const space = this.#engine.spaces.get(this.#spaceId);
+    if (!space) return;
+    const comps = space.components;
+
+    const positions = [];
+    const colors = [];
+    const N = 20; // samples per edge
+
+    // 8 corners of the sRGB cube (0-255)
+    const corners = [
+      [0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255],
+      [255, 255, 0], [255, 0, 255], [0, 255, 255], [255, 255, 255],
+    ];
+    // 12 edges connecting the corners
+    const edges = [
+      [0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 4],
+      [2, 6], [3, 5], [3, 6], [4, 7], [5, 7], [6, 7],
+    ];
+
+    for (const [a, b] of edges) {
+      for (let i = 0; i < N; i++) {
+        const t0 = i / N;
+        const t1 = (i + 1) / N;
+        for (const t of [t0, t1]) {
+          const rgb = [
+            corners[a][0] + (corners[b][0] - corners[a][0]) * t,
+            corners[a][1] + (corners[b][1] - corners[a][1]) * t,
+            corners[a][2] + (corners[b][2] - corners[a][2]) * t,
+          ];
+          try {
+            const vals = this.#engine.convert(rgb, 'srgb', this.#spaceId);
+            const pos = valueTo3D(vals, comps, this.#spaceId);
+            // Clamp to avoid degenerate geometry
+            for (let j = 0; j < 3; j++) {
+              if (!isFinite(pos[j])) pos[j] = 0;
+              pos[j] = Math.max(-2, Math.min(2, pos[j]));
+            }
+            positions.push(pos[0], pos[1], pos[2]);
+            colors.push(1.0, 0.5, 0.2, 0.4); // dim orange
+          } catch {
+            positions.push(0, 0, 0);
+            colors.push(0, 0, 0, 0); // invisible on failure
+          }
+        }
+      }
+    }
+
+    const posArr = new Float32Array(positions);
+    const colArr = new Float32Array(colors);
+    const count = positions.length / 3;
+
+    if (count > 0) {
+      this.#gamutWireVAO = this.#createVAO(posArr, colArr, count);
     }
   }
 
@@ -1121,6 +1210,83 @@ export class ColorSpace3D {
   }
 
   // -----------------------------------------------------------------------
+  //  History trace (recently picked colors)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Push the current color's XYZ into the history trace and rebuild the VAO.
+   * Called from the currentColor subscription.
+   */
+  #pushHistoryColor() {
+    const color = this.#state.get('currentColor');
+    if (!color) return;
+    try {
+      const xyz = this.#engine.convert(color.sourceValues, color.sourceSpace, 'xyz');
+      this.#historyTrace.push({ xyz });
+      // Keep last 200 entries
+      if (this.#historyTrace.length > 200) {
+        this.#historyTrace = this.#historyTrace.slice(-200);
+      }
+      if (this.#showHistoryTrace) {
+        this.#updateHistoryTrace();
+        this.#markDirty();
+      }
+    } catch {
+      // Conversion failed — skip this entry
+    }
+  }
+
+  /**
+   * Rebuild the history trace VAO by converting stored XYZ values
+   * to the current 3D space and computing sRGB vertex colors.
+   */
+  #updateHistoryTrace() {
+    if (this.#historyTrace.length < 2) {
+      if (this.#historyVAO) this.#historyVAO.count = 0;
+      return;
+    }
+
+    const space = this.#engine.spaces.get(this.#spaceId);
+    if (!space) return;
+    const comps = space.components;
+
+    const positions = [];
+    const colors = [];
+
+    for (const entry of this.#historyTrace) {
+      try {
+        const vals = this.#engine.convert(entry.xyz, 'xyz', this.#spaceId);
+        const pos = valueTo3D(vals, comps, this.#spaceId);
+        for (let i = 0; i < 3; i++) {
+          if (!isFinite(pos[i])) pos[i] = 0;
+          pos[i] = Math.max(-1.5, Math.min(1.5, pos[i]));
+        }
+        positions.push(...pos);
+      } catch {
+        positions.push(0, 0, 0);
+      }
+
+      // Color each vertex by converting its XYZ to sRGB
+      try {
+        const rgb = this.#engine.toSRGB(entry.xyz, 'xyz');
+        colors.push(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, 0.7);
+      } catch {
+        colors.push(0.5, 0.5, 0.5, 0.7);
+      }
+    }
+
+    const posArr = new Float32Array(positions);
+    const colArr = new Float32Array(colors);
+    const count = this.#historyTrace.length;
+
+    if (this.#historyVAO) {
+      this.#updateVAO(this.#historyVAO, posArr, colArr, count);
+    } else {
+      this.#historyVAO = this.#createVAO(posArr, colArr, count);
+    }
+  }
+
+  // -----------------------------------------------------------------------
   //  Image color distribution
   // -----------------------------------------------------------------------
 
@@ -1329,6 +1495,15 @@ export class ColorSpace3D {
   /** Draw all scene geometry (shared by normal and anaglyph paths). */
   #drawScene(gl, mvp) {
     this.#drawLines(this.#cubeVAO, mvp);
+
+    // sRGB gamut boundary wireframe (wide-gamut spaces only)
+    if (this.#gamutWireVAO && this.#gamutWireVAO.count > 0) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.#drawLines(this.#gamutWireVAO, mvp);
+      gl.disable(gl.BLEND);
+    }
+
     this.#drawPoints(this.#cloudVAO, mvp, this.#pointSize);
 
     // Draw the 2D picker's slice plane as a semi-transparent quad
@@ -1337,6 +1512,12 @@ export class ColorSpace3D {
     if (this.#traceVAO && this.#traceVAO.count >= 2) {
       this.#drawLineStrip(this.#traceVAO, mvp);
       this.#drawPoints(this.#traceVAO, mvp, 6.0);
+    }
+
+    // History trace (recently picked colors) — thinner line, smaller dots
+    if (this.#showHistoryTrace && this.#historyVAO && this.#historyVAO.count >= 2) {
+      this.#drawLineStrip(this.#historyVAO, mvp);
+      this.#drawPoints(this.#historyVAO, mvp, 3.0);
     }
 
     if (this.#markerVAO && this.#markerVAO.count > 0) {
@@ -1406,12 +1587,55 @@ export class ColorSpace3D {
   /** Draw the 2D picker's current slice plane — only when rotation is active.
    *  Tessellated into a grid so the surface follows the curvature of cylindrical
    *  colour spaces (HSB, HSL, LCh) where hue maps to an angle.  For cube spaces
-   *  the extra triangles are harmless (they still lie on a flat plane). */
+   *  the extra triangles are harmless (they still lie on a flat plane).
+   *
+   *  The plane is centered on the current color — matching what the 2D picker
+   *  actually renders — and extends beyond the volume wireframe so you can see
+   *  the full cross-section without vertex clamping artifacts. */
+  /**
+   * Clip a convex polygon against a half-space: keep vertices where
+   *   vertex[axis] * sign <= bound
+   * (Sutherland-Hodgman, one clip plane at a time.)
+   */
+  static #clipPoly(verts, axis, sign, bound) {
+    const out = [];
+    const n = verts.length;
+    if (n === 0) return out;
+    for (let i = 0; i < n; i++) {
+      const a = verts[i], b = verts[(i + 1) % n];
+      const da = a[axis] * sign - bound;
+      const db = b[axis] * sign - bound;
+      if (da <= 0) {
+        out.push(a);
+        if (db > 0) {
+          const t = da / (da - db);
+          out.push([a[0] + t * (b[0] - a[0]),
+                    a[1] + t * (b[1] - a[1]),
+                    a[2] + t * (b[2] - a[2])]);
+        }
+      } else if (db <= 0) {
+        const t = da / (da - db);
+        out.push([a[0] + t * (b[0] - a[0]),
+                  a[1] + t * (b[1] - a[1]),
+                  a[2] + t * (b[2] - a[2])]);
+      }
+    }
+    return out;
+  }
+
+  /** Clip a convex polygon to the [-1,1]³ cube (6 half-space clips). */
+  static #clipPolyToCube(verts) {
+    let p = verts;
+    for (let axis = 0; axis < 3; axis++) {
+      p = ColorSpace3D.#clipPoly(p, axis,  1, 1); // axis ≤ 1
+      p = ColorSpace3D.#clipPoly(p, axis, -1, 1); // -axis ≤ 1  →  axis ≥ -1
+    }
+    return p;
+  }
+
   #drawSlicePlane(gl, mvp) {
     const picker = this.#state.get('picker');
     if (picker.spaceId !== this.#spaceId) return;
-    // Only show the plane when rotation is non-zero — otherwise it's just an axis-aligned
-    // slice which isn't interesting to visualize, and it jumps around as sliders reconfigure
     const r1 = picker.rotAngle1 || 0;
     const r2 = picker.rotAngle2 || 0;
     if (Math.abs(r1) < 0.5 && Math.abs(r2) < 0.5) return;
@@ -1423,12 +1647,11 @@ export class ColorSpace3D {
     const rot2 = r2 * Math.PI / 180;
     const comps = space.components;
 
-    // Center of the plane: midpoint of X and Y ranges, excluded at its current value.
-    // This is a FIXED position based on the picker config, not the current color.
-    const center = [0, 0, 0];
     const xRange = comps[picker.xAxis].range;
     const yRange = comps[picker.yAxis].range;
     const eRange = comps[picker.excluded].range;
+
+    const center = [0, 0, 0];
     center[picker.xAxis]   = (xRange[0] + xRange[1]) / 2;
     center[picker.yAxis]   = (yRange[0] + yRange[1]) / 2;
     center[picker.excluded] = picker.excludedValue != null
@@ -1442,59 +1665,82 @@ export class ColorSpace3D {
     const yHalf = (yRange[1] - yRange[0]) / 2;
     const eHalf = (eRange[1] - eRange[0]) / 2;
 
-    // Axis vectors in (xAxis, yAxis, excluded) local space
-    const axX = [c1 * xHalf, 0, s1 * eHalf];
-    const axY = [0, c2 * yHalf, s2 * eHalf];
+    // Scale the plane large enough to always extend past the cube at any
+    // rotation angle.  cos(angle) shrinks the projection — at 45° it's only
+    // 0.707× the half-range, so the corners fall short of the cube edges.
+    // Multiplying by sqrt(3) ≈ 1.73 guarantees the quad fully encloses the
+    // cube's cross-section at any tilt; Sutherland-Hodgman then clips exactly.
+    const S = 1.7321; // sqrt(3)
+    const axX = [c1 * xHalf * S, 0, s1 * eHalf * S];
+    const axY = [0, c2 * yHalf * S, s2 * eHalf * S];
 
-    // --- Tessellate into an N×N grid so cylindrical mapping stays smooth ---
-    const N = CYLINDER_SPACES[this.#spaceId] ? 16 : 2; // only need subdivision for cylinders
-    const grid = [];  // (N+1)×(N+1) array of 3D positions
+    let triPositions;
 
-    for (let iy = 0; iy <= N; iy++) {
-      const sy = (iy / N) * 2 - 1; // -1 … +1
-      for (let ix = 0; ix <= N; ix++) {
-        const sx = (ix / N) * 2 - 1;
+    if (CYLINDER_SPACES[this.#spaceId]) {
+      // --- Cylindrical: tessellate + radius clamp ---
+      const N = 16;
+      const grid = [];
+      for (let iy = 0; iy <= N; iy++) {
+        const sy = (iy / N) * 2 - 1;
+        for (let ix = 0; ix <= N; ix++) {
+          const sx = (ix / N) * 2 - 1;
+          const vals = [...center];
+          vals[picker.xAxis]    += sx * axX[0] + sy * axY[0];
+          vals[picker.yAxis]    += sx * axX[1] + sy * axY[1];
+          vals[picker.excluded] += sx * axX[2] + sy * axY[2];
+          const pos = valueTo3D(vals, comps, this.#spaceId);
+          const r = Math.sqrt(pos[0] * pos[0] + pos[2] * pos[2]);
+          if (r > 1) { pos[0] /= r; pos[2] /= r; }
+          pos[1] = Math.max(-1, Math.min(1, pos[1]));
+          grid.push(pos[0], pos[1], pos[2]);
+        }
+      }
+      const stride = N + 1;
+      triPositions = [];
+      for (let iy = 0; iy < N; iy++) {
+        for (let ix = 0; ix < N; ix++) {
+          const i00 = (iy * stride + ix) * 3;
+          const i10 = (iy * stride + ix + 1) * 3;
+          const i01 = ((iy + 1) * stride + ix) * 3;
+          const i11 = ((iy + 1) * stride + ix + 1) * 3;
+          triPositions.push(
+            grid[i00], grid[i00+1], grid[i00+2],
+            grid[i10], grid[i10+1], grid[i10+2],
+            grid[i11], grid[i11+1], grid[i11+2],
+            grid[i00], grid[i00+1], grid[i00+2],
+            grid[i11], grid[i11+1], grid[i11+2],
+            grid[i01], grid[i01+1], grid[i01+2],
+          );
+        }
+      }
+    } else {
+      // --- Cube: compute 4 corners, then Sutherland-Hodgman clip to [-1,1]³ ---
+      const corners = [];
+      for (const [sx, sy] of [[-1,-1], [1,-1], [1,1], [-1,1]]) {
         const vals = [...center];
         vals[picker.xAxis]    += sx * axX[0] + sy * axY[0];
         vals[picker.yAxis]    += sx * axX[1] + sy * axY[1];
         vals[picker.excluded] += sx * axX[2] + sy * axY[2];
-
-        // Clamp to valid component ranges so the plane clips to the volume
-        for (let k = 0; k < 3; k++) {
-          vals[k] = Math.max(comps[k].range[0], Math.min(comps[k].range[1], vals[k]));
-        }
-
         const pos = valueTo3D(vals, comps, this.#spaceId);
-        grid.push(pos[0], pos[1], pos[2]);
+        corners.push([pos[0], pos[1], pos[2]]);
       }
-    }
 
-    // Build triangle list from the grid (2 triangles per cell)
-    const stride = N + 1;
-    const triPositions = [];
-    for (let iy = 0; iy < N; iy++) {
-      for (let ix = 0; ix < N; ix++) {
-        const i00 = (iy * stride + ix) * 3;
-        const i10 = (iy * stride + ix + 1) * 3;
-        const i01 = ((iy + 1) * stride + ix) * 3;
-        const i11 = ((iy + 1) * stride + ix + 1) * 3;
+      const clipped = ColorSpace3D.#clipPolyToCube(corners);
+      if (clipped.length < 3) return; // fully outside
 
-        // Triangle 1: (00, 10, 11)
+      // Fan-triangulate the clipped convex polygon from vertex 0
+      triPositions = [];
+      for (let i = 1; i < clipped.length - 1; i++) {
         triPositions.push(
-          grid[i00], grid[i00+1], grid[i00+2],
-          grid[i10], grid[i10+1], grid[i10+2],
-          grid[i11], grid[i11+1], grid[i11+2],
-        );
-        // Triangle 2: (00, 11, 01)
-        triPositions.push(
-          grid[i00], grid[i00+1], grid[i00+2],
-          grid[i11], grid[i11+1], grid[i11+2],
-          grid[i01], grid[i01+1], grid[i01+2],
+          clipped[0][0], clipped[0][1], clipped[0][2],
+          clipped[i][0], clipped[i][1], clipped[i][2],
+          clipped[i+1][0], clipped[i+1][1], clipped[i+1][2],
         );
       }
     }
 
     const vertexCount = triPositions.length / 3;
+    if (vertexCount < 3) return;
     const positions = new Float32Array(triPositions);
     const colors = new Float32Array(vertexCount * 4);
     for (let i = 0; i < vertexCount; i++) {
@@ -1508,7 +1754,6 @@ export class ColorSpace3D {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.depthMask(false);
 
-    // Create temporary buffers
     const posBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);
@@ -1705,6 +1950,8 @@ export class ColorSpace3D {
           'picker.rotAngle1': Math.max(-180, Math.min(180, Math.round(rot1))),
           'picker.rotAngle2': Math.max(-180, Math.min(180, Math.round(rot2))),
         });
+        // Fire a DOM event so sliders update (bypasses state subscription edge cases)
+        document.dispatchEvent(new Event('picker-rotation-changed'));
       } else {
         // Normal drag: rotate the camera view
         this.#rotY += dx * 0.008;
@@ -1734,16 +1981,10 @@ export class ColorSpace3D {
   //  Space selector dropdown
   // -----------------------------------------------------------------------
 
-  #populateSpaceSelect() {
-    const select = this.#select;
-    select.innerHTML = '';
-    for (const [id, def] of this.#engine.spaces) {
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = def.name;
-      select.appendChild(opt);
-    }
-    select.value = this.#spaceId;
+  #updateSpaceLabel() {
+    if (!this.#spaceLabel) return;
+    const space = this.#engine.spaces.get(this.#spaceId);
+    this.#spaceLabel.textContent = space ? `(${space.name})` : '';
   }
 
   #populateDualSelect() {
@@ -1768,34 +2009,33 @@ export class ColorSpace3D {
   // -----------------------------------------------------------------------
 
   #initSubscriptions() {
-    // Current color changes -> update marker
+    // Current color changes -> update marker + push to history trace
     this.#unsubs.push(
       this.#state.subscribe('currentColor', () => {
         this.#updateMarker();
+        this.#pushHistoryColor();
         this.#markDirty();
       })
     );
 
-    // Picker space changes -> optionally auto-switch
+    // Picker state changes — subscribe to 'picker' (not 'picker.spaceId') because
+    // PickerControls replaces the whole object via state.set('picker', {...}), and
+    // the notification system only fires parent-path subscribers, not child-path ones.
     this.#unsubs.push(
-      this.#state.subscribe('picker.spaceId', (newSpace) => {
-        if (newSpace && this.#engine.spaces.has(newSpace)) {
+      this.#state.subscribe('picker', () => {
+        const picker = this.#state.get('picker');
+        const newSpace = picker.spaceId;
+        if (newSpace && newSpace !== this.#spaceId && this.#engine.spaces.has(newSpace)) {
           this.#spaceId = newSpace;
-          this.#select.value = newSpace;
+          this.#updateSpaceLabel();
           this.#rebuildCloud();
           this.#updateMarker();
           this.#updateTrace();
-          this.#markDirty();
+          if (this.#showHistoryTrace) this.#updateHistoryTrace();
         }
+        // Always redraw for rotation / excludedValue changes (slice plane)
+        this.#markDirty();
       })
-    );
-
-    // Rotation angle or excluded-value changes from the 2D picker controls
-    // -> redraw the slice plane in the 3D view
-    this.#unsubs.push(
-      this.#state.subscribe('picker.rotAngle1', () => this.#markDirty()),
-      this.#state.subscribe('picker.rotAngle2', () => this.#markDirty()),
-      this.#state.subscribe('picker.excludedValue', () => this.#markDirty()),
     );
 
     // Saved colors -> update trace if we are showing it

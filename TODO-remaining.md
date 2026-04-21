@@ -12,12 +12,10 @@
 3. ~~**RBF-based 2D Gradient Extrapolation**~~ ✅ DONE
    - Thin-plate spline RBF, Gaussian elimination solver, overlay rendering
 
-4. **Palette Drawing with Scroll-Wheel Exhaustion** (todo line 55) — Medium
-   - When drawing a palette onto the 2D picker, scroll wheel modulates exhaustion rate
-   - Faster turning = faster palette index consumption
-   - Reverse turning = reverse exhaustion
-   - Show a floating logarithmic slider near the mouse showing current rate
-   - Note: core drawing already works (freehand + 5 shape modes), this is an enhancement
+4. ~~**Palette Drawing with Scroll-Wheel Exhaustion**~~ ✅ DONE
+   - Scroll wheel during freehand drawing modulates exhaustion rate (×0.01 to ×100)
+   - Floating indicator near cursor shows current rate
+   - Palette entries filled in real-time as mouse moves
 
 5. ~~**Color Preview Image During Palette Blend**~~ ✅ DONE (already worked)
 
@@ -25,6 +23,6 @@
 
 7. ~~**Drag Colors FROM Palette Strip**~~ ✅ DONE (Alt+click)
 
-8. **Six-Dimension Color Opponent Model** (todo line 118) — Medium
-   - R, B, W, K, Y, G as six dimensions without requiring orthogonality
-   - "preferred model" per the todo
+8. ~~**Six-Dimension Color Opponent Model**~~ ✅ DONE
+   - 6 uni-polar sliders: Red, Green, Yellow, Blue, White, Black
+   - Linked pairs: R↔G, Y↔B, W↔K mapped to 3-channel opponent model

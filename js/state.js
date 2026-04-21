@@ -71,6 +71,8 @@ export const DEFAULT_STATE = Object.freeze({
     currentPalette: null,
     savedPalettes: [],
   },
+
+  rbfGradients: [],
 });
 
 // ---- Path helpers ---------------------------------------------------------
@@ -366,6 +368,22 @@ export class AppState {
   /** Return a deep-cloned read-only copy of the entire state tree. */
   snapshot() {
     return clone(this.#state);
+  }
+
+  /**
+   * Replace the entire state tree from a snapshot object (e.g. from a
+   * previously exported session JSON). Merges with defaults so any keys
+   * missing from the snapshot get safe fallback values, then notifies all
+   * subscribers and persists.
+   */
+  loadFromSnapshot(data) {
+    this.#state = deepMerge(clone(DEFAULT_STATE), clone(data));
+    this.#undoStack.length = 0;
+    this.#redoStack.length = 0;
+
+    // Notify everything (same pattern as cleanSlate)
+    this.#enqueueNotification('', clone(this.#state), null);
+    this.save();
   }
 
   // ---- Internal: undo stack management ----------------------------------
