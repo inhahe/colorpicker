@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="pragma" content="no-cache">
+  <meta http-equiv="expires" content="0">
+  <title>Ultimate Color Picker</title>
+  <link rel="stylesheet" href="style.css?v=16">
+</head>
+<body>
+  <!-- Top toolbar -->
+  <header id="toolbar">
+    <div class="toolbar-left">
+      <h1 class="app-title">Color Picker</h1>
+      <button id="btn-eyedropper" class="tool-btn" title="Pick color from screen (I)">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 3a2.12 2.12 0 0 0-3 0l-1.5 1.5L11 3l-7 7 1.5 1.5L3 14a2 2 0 0 0-.5 1L2 18l3-.5a2 2 0 0 0 1-.5l2.5-2.5L10 16l7-7-1.5-1.5L17 6a2.12 2.12 0 0 0 0-3z"/>
+          <line x1="6" y1="10" x2="10" y2="14"/>
+        </svg>
+        Eyedropper
+      </button>
+      <button id="btn-undo" class="tool-btn" title="Undo (Ctrl+Z)" disabled>
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="4 8 1 5 4 2"/>
+          <path d="M1 5h12a5 5 0 0 1 0 10H6"/>
+        </svg>
+      </button>
+      <button id="btn-redo" class="tool-btn" title="Redo (Ctrl+Y)" disabled>
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 8 19 5 16 2"/>
+          <path d="M19 5H7a5 5 0 0 0 0 10h8"/>
+        </svg>
+      </button>
+    </div>
+    <div class="toolbar-right">
+      <button id="btn-gradient-tool" class="tool-btn" title="Two-color gradient (G)">Gradient</button>
+      <button id="btn-triangle-tool" class="tool-btn" title="Three-color triangle (T)">Triangle</button>
+      <button id="btn-clean-slate" class="tool-btn" title="Reset to defaults">Clean Slate</button>
+      <button id="btn-palette-editor" class="tool-btn" title="Open palette editor">Palette Editor</button>
+    </div>
+  </header>
+
+  <!-- Main content area -->
+  <main id="main-content"></main>
+
+  <!-- Panels (hidden until Golden Layout moves them into containers) -->
+  <div id="panel-sliders" style="display:none">
+    <div class="panel-header"><span>Color Models</span><button id="btn-add-space" class="small-btn" title="Add color model">+</button></div>
+    <div id="slider-groups"></div>
+  </div>
+  <div id="panel-picker" style="display:none">
+    <div id="picker-controls">
+      <select id="picker-space-select" title="Color model for 2D picker"></select>
+      <div class="picker-axis-controls">
+        <label>X: <select id="picker-x-select"></select></label>
+        <label>Y: <select id="picker-y-select"></select></label>
+        <label>Fixed: <select id="picker-excluded-select"></select></label>
+      </div>
+      <div class="picker-axis-buttons">
+        <button id="btn-swap-axes" class="small-btn" title="Swap X and Y axes">&#8644; Swap</button>
+        <button id="btn-reverse-x" class="small-btn" title="Reverse X axis">&#8596; Rev X</button>
+        <button id="btn-reverse-y" class="small-btn" title="Reverse Y axis">&#8597; Rev Y</button>
+        <button id="btn-rotate-picker" class="small-btn" title="Rotate axes">&#10227; Rotate</button>
+      </div>
+      <span class="palette-separator"></span>
+      <button id="btn-save-picker" class="small-btn" title="Save current picker config">Save View</button>
+      <select id="picker-saved-views" class="small-btn" title="Load a saved picker view"><option value="">-- Saved Views --</option></select>
+    </div>
+    <div id="picker-area">
+      <canvas id="picker-y-slider" class="axis-slider axis-slider-y" width="24" height="300"></canvas>
+      <div id="picker-right-col">
+        <div id="picker-canvas-container">
+          <canvas id="picker-canvas" width="256" height="256"></canvas>
+          <div id="picker-crosshair" class="crosshair"></div>
+        </div>
+        <canvas id="picker-x-slider" class="axis-slider axis-slider-x" width="256" height="24"></canvas>
+        <div id="excluded-slider-container" style="display:none">
+          <label id="excluded-label">Hue</label>
+          <canvas id="excluded-slider" width="400" height="24"></canvas>
+          <input type="number" id="excluded-value" class="num-input" step="1">
+        </div>
+      </div><!-- /picker-right-col -->
+    </div><!-- /picker-area -->
+    <div id="gradient-tools">
+      <div id="two-color-gradient" class="gradient-section" style="display:none">
+        <div class="gradient-header"><span>Two-Color Gradient</span><button class="small-btn close-btn" data-close="two-color-gradient">&times;</button></div>
+        <div class="gradient-endpoints">
+          <div id="gradient-color1" class="gradient-swatch" title="Click to set from current color"></div>
+          <canvas id="gradient-bar" width="300" height="30"></canvas>
+          <div id="gradient-color2" class="gradient-swatch" title="Click to set from current color"></div>
+        </div>
+      </div>
+      <div id="three-color-gradient" class="gradient-section" style="display:none">
+        <div class="gradient-header"><span>Three-Color Triangle</span><button class="small-btn close-btn" data-close="three-color-gradient">&times;</button></div>
+        <canvas id="triangle-canvas" width="300" height="260"></canvas>
+        <div class="triangle-swatches">
+          <div id="tri-color1" class="gradient-swatch" title="Color 1"></div>
+          <div id="tri-color2" class="gradient-swatch" title="Color 2"></div>
+          <div id="tri-color3" class="gradient-swatch" title="Color 3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="panel-3dview" style="display:none"><div id="view3d-container"></div></div>
+  <div id="panel-harmony" style="display:none"><div id="harmony-container"></div></div>
+  <div id="panel-info" style="display:none">
+    <div class="panel-header" style="padding:0;height:auto;border:none;justify-content:flex-start;gap:6px;"><span>Color Info</span><select id="info-space-select" title="Show info for this color model"></select></div>
+    <div id="info-content">
+      <div id="info-description" class="info-section"></div>
+      <div id="info-equations" class="info-section"><h3>Equations</h3><div id="info-equations-content"></div></div>
+      <div id="info-gamut" class="info-section"><h3>Gamut</h3><div id="info-gamut-content"></div></div>
+    </div>
+  </div>
+  <div id="panel-hexpicker" style="display:none"><div id="hexpicker-container"></div></div>
+  <div id="panel-accuracy" style="display:none">
+    <h3>Display Accuracy</h3>
+    <div id="accuracy-meters">
+      <div class="meter-group" id="meter-group-original" style="display:none"></div>
+      <div class="meter-group" id="meter-group-hsb" style="display:none"></div>
+      <div class="meter-group" id="meter-group-lms" style="display:none"></div>
+    </div>
+    <div class="meter-controls">
+      <label><input type="radio" name="meter-group" value="original"> Original</label>
+      <label><input type="radio" name="meter-group" value="hsb" checked> HSB</label>
+      <label><input type="radio" name="meter-group" value="lms"> LMS</label>
+    </div>
+    <div id="accuracy-delta-e" class="delta-e-display"></div>
+  </div>
+
+  <!-- Swatch + Hex + CSS output — movable panel -->
+  <div id="panel-color-output" style="display:none">
+    <div id="current-swatch-container">
+      <div id="current-swatch" title="Current color — drag to move">
+        <div id="swatch-actual" class="swatch-half" title="Displayed (sRGB)"></div>
+        <div id="swatch-intended" class="swatch-half" title="Intended color"></div>
+      </div>
+      <div id="hex-display">
+        <input type="text" id="hex-input" class="hex-input" value="#4A90D9" spellcheck="false" maxlength="7">
+        <button id="btn-copy-hex" class="small-btn" title="Copy hex to clipboard">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="6" width="11" height="11" rx="1"/><path d="M3 14V4a1 1 0 0 1 1-1h10"/>
+          </svg>
+        </button>
+        <button id="btn-paste-hex" class="small-btn" title="Paste hex from clipboard">
+          <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="2" width="12" height="16" rx="1"/><path d="M7 2h6v2a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V2z"/>
+            <line x1="7" y1="9" x2="13" y2="9"/><line x1="7" y1="12" x2="11" y2="12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div id="color-output">
+      <div id="css-formats"></div>
+      <div id="contrast-info"></div>
+      <div id="nearest-name"></div>
+    </div>
+    <div id="quick-colors">
+      <button class="quick-btn" data-color="#000000" title="Black" style="background:#000"></button>
+      <button class="quick-btn" data-color="#FFFFFF" title="White" style="background:#FFF"></button>
+      <button class="quick-btn" data-color="#FF0000" title="Red" style="background:#F00"></button>
+      <button class="quick-btn" data-color="#00FF00" title="Green" style="background:#0F0"></button>
+      <button class="quick-btn" data-color="#0000FF" title="Blue" style="background:#00F"></button>
+      <button class="quick-btn" data-color="#FFFF00" title="Yellow" style="background:#FF0"></button>
+      <button class="quick-btn" data-color="#FF00FF" title="Magenta" style="background:#F0F"></button>
+      <button class="quick-btn" data-color="#00FFFF" title="Cyan" style="background:#0FF"></button>
+    </div>
+  </div>
+
+  <!-- Saved colors + history — movable panel -->
+  <div id="panel-saved" style="display:none">
+    <div id="saved-colors-container">
+      <div class="panel-header" style="height:auto;padding:2px 4px;border:none;">
+        <span>Saved Colors</span>
+        <button id="btn-save-color" class="small-btn" title="Save current color">+ Save</button>
+      </div>
+      <div id="saved-colors-strip"></div>
+    </div>
+    <div id="color-history-container">
+      <div class="panel-header" style="height:auto;padding:2px 4px;border:none;">
+        <span>History</span>
+        <button id="btn-clear-history" class="small-btn" title="Clear history">&times;</button>
+      </div>
+      <div id="color-history-strip"></div>
+    </div>
+    <div id="collections-container">
+      <select id="collection-select" title="Standard color collections">
+        <option value="">-- Collections --</option>
+      </select>
+      <div id="collection-colors"></div>
+    </div>
+  </div>
+
+  <!-- Color space picker modal (for adding/removing active spaces) -->
+  <dialog id="space-picker-dialog">
+    <h2>Color Models</h2>
+    <div id="space-picker-list"></div>
+    <div class="dialog-buttons">
+      <button id="btn-close-space-picker" class="tool-btn">Close</button>
+    </div>
+  </dialog>
+
+  <!-- Palette editor panel (initially hidden) -->
+  <section id="palette-editor-panel" style="display:none">
+    <div class="panel-header">
+      <span>Palette Editor</span>
+      <button id="btn-close-palette" class="small-btn">&times;</button>
+    </div>
+    <div id="palette-content">
+      <div id="palette-top-row">
+        <canvas id="palette-canvas" width="800" height="60"></canvas>
+        <div id="palette-image-container">
+          <button id="btn-close-preview-image" class="small-btn" title="Close preview image">&times;</button>
+          <canvas id="palette-image-canvas"></canvas>
+        </div>
+      </div>
+      <div id="palette-controls">
+        <button class="tool-btn" id="btn-palette-new">New</button>
+        <button class="tool-btn" id="btn-palette-random" title="Random palette with configurable complexity">Random</button>
+        <button class="tool-btn" id="btn-palette-from-image">From Image</button>
+        <button class="tool-btn" id="btn-palette-load-preview" title="Load a 256-color image to preview with this palette">Preview Image</button>
+        <button class="tool-btn" id="btn-palette-from-saved" title="Create palette from saved colors via spline interpolation">From Saved</button>
+        <select id="palette-shape-mode" class="tool-btn" style="padding:0 4px;" title="Shape tool for drawing on 2D picker">
+          <option value="freehand">Draw: Free</option>
+          <option value="line">Draw: Line</option>
+          <option value="rect">Draw: Rect</option>
+          <option value="ellipse">Draw: Ellipse</option>
+          <option value="polygon">Draw: Polygon</option>
+        </select>
+        <button class="tool-btn" id="btn-palette-curves" title="Draw RGB/HSB curves to define palette">Curves</button>
+        <button class="tool-btn" id="btn-palette-save">Save</button>
+        <button class="tool-btn" id="btn-palette-load">Load</button>
+        <button class="tool-btn" id="btn-palette-export">Export</button>
+        <button class="tool-btn" id="btn-palette-blend" title="Blend between two saved palettes">Blend</button>
+        <button class="tool-btn" id="btn-palette-mix" title="RGB channel mixing matrix">Mix</button>
+        <span class="palette-separator"></span>
+        <button class="tool-btn" id="btn-palette-hue-minus" title="Shift hue -30°">&larr;H</button>
+        <button class="tool-btn" id="btn-palette-hue-plus" title="Shift hue +30°">H&rarr;</button>
+        <button class="tool-btn" id="btn-palette-sat-up" title="Increase saturation">+S</button>
+        <button class="tool-btn" id="btn-palette-sat-down" title="Decrease saturation">-S</button>
+        <button class="tool-btn" id="btn-palette-brighter" title="Brighter">+L</button>
+        <button class="tool-btn" id="btn-palette-darker" title="Darker">-L</button>
+        <button class="tool-btn" id="btn-palette-reverse" title="Reverse palette">Rev</button>
+        <button class="tool-btn" id="btn-palette-smooth" title="Smooth palette">Smooth</button>
+        <select id="palette-spline-mode" class="tool-btn" title="Spline interpolation mode" style="padding:0 4px;">
+          <option value="catmull-rom">Catmull-Rom</option>
+          <option value="linear">Linear</option>
+          <option value="bezier">Bezier</option>
+        </select>
+        <span class="palette-separator"></span>
+        <button class="tool-btn" id="btn-palette-select" title="Click+drag on palette to select a range">Select</button>
+        <button class="tool-btn" id="btn-palette-cut" title="Cut selected range" disabled>Cut</button>
+        <button class="tool-btn" id="btn-palette-copy" title="Copy selected range" disabled>Copy</button>
+        <button class="tool-btn" id="btn-palette-paste" title="Paste into selected range" disabled>Paste</button>
+        <span class="palette-separator"></span>
+        <label class="palette-rotate-label">Rotate: <input type="range" id="palette-rotation" min="0" max="255" value="0"></label>
+        <label class="palette-rotate-label">Animate: <input type="range" id="palette-animate-speed" min="0" max="100" value="0" title="Palette rotation animation speed"></label>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="js/app.js?v=61"></script>
+</body>
+</html>
