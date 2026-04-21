@@ -749,6 +749,9 @@ export class ColorSliders {
         if (!this.#suppressUpdate) this.#updateFromColor();
       }),
       state.subscribe('activeSpaces', () => this.render()),
+      // Re-render gradients when picker config changes (rotation angles, axis swap, etc.)
+      // so ★ labels and rotated gradient rendering stay in sync with Shift+drag in 3D view
+      state.subscribe('picker', () => this.#scheduleGradientRender()),
     );
 
     this.render();
@@ -958,8 +961,10 @@ export class ColorSliders {
 
     // Reconfigure the 2D picker: the dragged component becomes the
     // excluded (depth) dimension, the other two become X and Y axes.
+    // BUT: skip reconfiguration when rotation is active (preserves the rotated plane)
     const picker = this.#state.get('picker');
-    const needsReconfig = picker.spaceId !== spaceId || picker.excluded !== componentIndex;
+    const isRotated = Math.abs(picker.rotAngle1 || 0) > 0.5 || Math.abs(picker.rotAngle2 || 0) > 0.5;
+    const needsReconfig = !isRotated && (picker.spaceId !== spaceId || picker.excluded !== componentIndex);
     const otherAxes = [0, 1, 2].filter(i => i !== componentIndex);
 
     this.#suppressUpdate = true;
@@ -1049,8 +1054,20 @@ export class ColorSliders {
           values = this.#engine.convert(color.xyz, 'xyz', spaceId);
         }
 
+        // Check if this space has rotation active
+        const picker = this.#state.get('picker');
+        const isRotatedSpace = spaceId === picker.spaceId &&
+          (Math.abs(picker.rotAngle1 || 0) > 0.5 || Math.abs(picker.rotAngle2 || 0) > 0.5);
+
         for (let ci = 0; ci < space.components.length; ci++) {
-          this.#renderSliderGradient(group.canvases[ci], space, ci, values);
+          // Update label with ★ indicator when rotation is active
+          const labelEl = group.el.querySelectorAll('.slider-label')[ci];
+          if (labelEl) {
+            const baseName = space.components[ci].name;
+            labelEl.textContent = isRotatedSpace ? baseName + ' ★' : baseName;
+          }
+
+          this.#renderSliderGradient(group.canvases[ci], space, ci, values, isRotatedSpace ? picker : null);
         }
       } catch (err) {
         // One space failing shouldn't prevent others from rendering
@@ -1059,7 +1076,7 @@ export class ColorSliders {
     }
   }
 
-  #renderSliderGradient(canvasInfo, space, componentIndex, currentValues) {
+  #renderSliderGradient(canvasInfo, space, componentIndex, currentValues, rotPicker = null) {
     const { canvas, ctx } = canvasInfo;
     // Sync canvas internal resolution with its CSS display size
     const cw = canvas.clientWidth || 200;
@@ -1085,17 +1102,51 @@ export class ColorSliders {
       }
     }
 
+    // Skip GPU for rotated sliders — CPU only (rotation not in GLSL)
+    if (rotPicker && this.#sliderGL?.isReady) {
+      // Fall through to CPU for rotated rendering
+    }
+
     // CPU fallback
     const w = canvas.width;
     const h = canvas.height;
-    if (w < 1 || h < 1) { console.warn(`[SLIDER] SKIP: zero canvas`); return; }
+    if (w < 1 || h < 1) return;
     const row = new Uint8ClampedArray(w * 4);
+
+    // Precompute rotation axes if rotated
+    let rotAxes = null;
+    if (rotPicker) {
+      const a1 = (rotPicker.rotAngle1 || 0) * Math.PI / 180;
+      const a2 = (rotPicker.rotAngle2 || 0) * Math.PI / 180;
+      const comps = space.components;
+      const xH = (comps[rotPicker.xAxis].range[1] - comps[rotPicker.xAxis].range[0]) / 2;
+      const yH = (comps[rotPicker.yAxis].range[1] - comps[rotPicker.yAxis].range[0]) / 2;
+      const eH = (comps[rotPicker.excluded].range[1] - comps[rotPicker.excluded].range[0]) / 2;
+      // Which rotated axis does this component's slider correspond to?
+      if (componentIndex === rotPicker.xAxis) {
+        rotAxes = [Math.cos(a1) * xH, 0, Math.sin(a1) * eH]; // rotated X
+      } else if (componentIndex === rotPicker.yAxis) {
+        rotAxes = [0, Math.cos(a2) * yH, Math.sin(a2) * eH]; // rotated Y
+      }
+      // excluded component slider stays standard (perpendicular to the plane)
+    }
 
     for (let px = 0; px < w; px++) {
       const t = w > 1 ? px / (w - 1) : 0;
       const val = lerp(min, max, t);
-      const values = [...currentValues];
-      values[componentIndex] = val;
+      let values;
+
+      if (rotAxes) {
+        // Move along the rotated axis from the center
+        const tNorm = t * 2 - 1; // -1 to 1
+        values = [...currentValues];
+        values[rotPicker.xAxis]    += tNorm * rotAxes[0];
+        values[rotPicker.yAxis]    += tNorm * rotAxes[1];
+        values[rotPicker.excluded] += tNorm * rotAxes[2];
+      } else {
+        values = [...currentValues];
+        values[componentIndex] = val;
+      }
 
       let r = 0, g = 0, b = 0;
       try {
@@ -1485,6 +1536,111 @@ export class PickerControls {
     if (rot2) rot2.addEventListener('input', () => {
       this.#state.set('picker.rotAngle2', parseFloat(rot2.value));
     });
+
+    // Rotation: draw a line on the picker to set rotation direction
+    const rotLineBtn = elements.rotLine;
+    if (rotLineBtn) {
+      rotLineBtn.addEventListener('click', () => {
+        const pickerCanvas = document.getElementById('picker-canvas-container') || document.getElementById('picker-canvas');
+        if (!pickerCanvas) return;
+        rotLineBtn.style.background = '#4a90d9';
+        rotLineBtn.textContent = 'Click start...';
+
+        let startPt = null;
+        let cleanup = null;
+
+        const onDown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const rect = pickerCanvas.getBoundingClientRect();
+          const x = (e.clientX - rect.left) / rect.width;
+          const y = (e.clientY - rect.top) / rect.height;
+
+          if (!startPt) {
+            startPt = { x, y };
+            rotLineBtn.textContent = 'Click end...';
+          } else {
+            const dx = x - startPt.x;
+            const dy = y - startPt.y;
+            // Gentle rotation: scale so a full-canvas drag = 90 degrees max
+            const angle1 = Math.round(dx * 90);
+            const angle2 = Math.round(-dy * 90);
+            this.#state.batch({
+              'picker.rotAngle1': Math.max(-180, Math.min(180, angle1)),
+              'picker.rotAngle2': Math.max(-180, Math.min(180, angle2)),
+            });
+            cleanup();
+          }
+        };
+
+        cleanup = () => {
+          pickerCanvas.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey);
+          rotLineBtn.style.background = '';
+          rotLineBtn.textContent = 'Line';
+        };
+
+        const onKey = (e) => {
+          if (e.key === 'Escape') { cleanup(); }
+        };
+
+        // Use capture so we intercept before the picker's own mousedown handler
+        pickerCanvas.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey);
+      });
+    }
+
+    // Rotation: pick two colors to define the rotation vector
+    const rot2ColorBtn = elements.rot2Color;
+    if (rot2ColorBtn) {
+      rot2ColorBtn.addEventListener('click', () => {
+        const picker = this.#state.get('picker');
+        const space = this.#engine.spaces.get(picker.spaceId);
+        if (!space) return;
+
+        const color1 = this.#state.get('currentColor');
+        const vals1 = this.#engine.convert(color1.xyz, 'xyz', picker.spaceId);
+
+        rot2ColorBtn.style.background = '#4a90d9';
+        rot2ColorBtn.textContent = 'Pick 2nd...';
+
+        // Wait for the next color change
+        const unsub = this.#state.subscribe('currentColor', () => {
+          unsub();
+          const color2 = this.#state.get('currentColor');
+          const vals2 = this.#engine.convert(color2.xyz, 'xyz', picker.spaceId);
+
+          // Compute the vector between the two colors in the space
+          const comps = space.components;
+          const dx = (vals2[picker.xAxis] - vals1[picker.xAxis]) /
+            (comps[picker.xAxis].range[1] - comps[picker.xAxis].range[0]);
+          const dy = (vals2[picker.yAxis] - vals1[picker.yAxis]) /
+            (comps[picker.yAxis].range[1] - comps[picker.yAxis].range[0]);
+          const de = (vals2[picker.excluded] - vals1[picker.excluded]) /
+            (comps[picker.excluded].range[1] - comps[picker.excluded].range[0]);
+
+          // Convert to rotation angles
+          const angle1 = Math.atan2(de, Math.max(0.01, Math.abs(dx))) * 180 / Math.PI * Math.sign(dx || 1);
+          const angle2 = Math.atan2(de, Math.max(0.01, Math.abs(dy))) * 180 / Math.PI * Math.sign(dy || 1);
+
+          this.#state.batch({
+            'picker.rotAngle1': Math.round(angle1),
+            'picker.rotAngle2': Math.round(angle2),
+          });
+
+          rot2ColorBtn.style.background = '';
+          rot2ColorBtn.textContent = '2 Colors';
+        });
+      });
+    }
+
+    // Rotation: reset button
+    const rotResetBtn = elements.rotReset;
+    if (rotResetBtn) {
+      rotResetBtn.addEventListener('click', () => {
+        this.#state.batch({ 'picker.rotAngle1': 0, 'picker.rotAngle2': 0 });
+      });
+    }
 
     // Space change — reset rotation angles
     spaceSelect.addEventListener('change', () => {

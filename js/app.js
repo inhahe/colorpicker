@@ -151,9 +151,11 @@ class App {
 
     // Build columns
     layout.forEach((col, ci) => {
+      const ml = col.marginLeft || 0;
+      const mlStyle = ml > 0 ? `margin-left:${ml}px;` : '';
       const colEl = DIV(col.width > 0
-        ? `width:${col.width}px;flex-shrink:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative;`
-        : `flex:1;min-width:100px;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative;`);
+        ? `width:${col.width}px;flex-shrink:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative;${mlStyle}`
+        : `flex:1;min-width:100px;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative;${mlStyle}`);
       colEl.dataset.col = ci;
 
       // Left-edge resize handle — shifts the column rightward, creating free space on the left
@@ -228,8 +230,9 @@ class App {
         if (!panel) return;
         panel.style.display = '';
 
-        // Panel wrapper
-        const wrap = DIV('flex:1;display:flex;flex-direction:column;min-height:60px;overflow:hidden;');
+        // Panel wrapper — restore height if saved
+        const hStyle = p.height > 0 ? `flex:none;height:${p.height}px;` : 'flex:1;';
+        const wrap = DIV(`${hStyle}display:flex;flex-direction:column;min-height:60px;overflow:hidden;`);
         wrap.dataset.panelId = p.id;
 
         // Handle
@@ -549,6 +552,37 @@ class App {
         a.click();
       });
       resetBtn.parentElement.insertBefore(exportBtn, resetBtn);
+
+      const importBtn = document.createElement('button');
+      importBtn.className = 'tool-btn';
+      importBtn.textContent = 'Import Layout';
+      importBtn.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.style.display = 'none';
+        input.addEventListener('change', () => {
+          const file = input.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const layout = JSON.parse(e.target.result);
+              if (Array.isArray(layout) && layout.length > 0) {
+                localStorage.setItem('colorPickerPanelLayout2', JSON.stringify(layout));
+                location.reload();
+              }
+            } catch (err) {
+              alert('Invalid layout file: ' + err.message);
+            }
+          };
+          reader.readAsText(file);
+        });
+        document.body.appendChild(input);
+        input.click();
+        document.body.removeChild(input);
+      });
+      resetBtn.parentElement.insertBefore(importBtn, resetBtn);
     }
   }
 
@@ -563,9 +597,17 @@ class App {
     const layout = [];
     for (const colEl of main.children) {
       if (!colEl.dataset || colEl.dataset.col === undefined) continue;
-      const col = { width: colEl.style.flex === '1' ? 0 : colEl.offsetWidth, panels: [] };
+      const col = {
+        width: colEl.style.flex === '1' ? 0 : colEl.offsetWidth,
+        marginLeft: parseInt(colEl.style.marginLeft) || 0,
+        panels: [],
+      };
       colEl.querySelectorAll('[data-panel-id]').forEach(wrap => {
-        col.panels.push({ id: wrap.dataset.panelId, label: wrap.querySelector('div').textContent });
+        col.panels.push({
+          id: wrap.dataset.panelId,
+          label: wrap.querySelector('div')?.textContent || wrap.dataset.panelId,
+          height: wrap.style.flex === '1' || !wrap.style.height ? 0 : wrap.offsetHeight,
+        });
       });
       if (col.panels.length > 0) layout.push(col);
     }
@@ -649,6 +691,9 @@ class App {
         rotateBtn: $('btn-rotate-picker'),
         rot1: $('picker-rot1'),
         rot2: $('picker-rot2'),
+        rotLine: $('btn-rot-line'),
+        rot2Color: $('btn-rot-2color'),
+        rotReset: $('btn-rot-reset'),
       },
       this.state,
       this.engine

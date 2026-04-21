@@ -216,66 +216,94 @@ export class RBFGradient {
     return this.#active;
   }
 
-  /** Toggle RBF mode on or off. */
+  // Three modes: 'off' | 'edit' | 'use'
+  // edit = place/move/remove points (overlay intercepts clicks)
+  // use = gradient visible, clicks pick colors from it (overlay visible but click passes through to color picking)
+  // off = gradient hidden, normal picker
+  #mode = 'off';
+
+  /** Cycle through modes: off → edit → use → off */
   toggle() {
-    if (this.#active) {
-      this.deactivate();
+    if (this.#mode === 'off') {
+      this.#setMode('edit');
+    } else if (this.#mode === 'edit') {
+      this.#setMode('use');
     } else {
-      this.activate();
+      this.#setMode('off');
     }
   }
 
-  /** Enter RBF mode. */
-  activate() {
-    this.#active = true;
-    if (this.#button) {
-      this.#button.style.background = '#2a6cb8';
-      this.#button.style.color = '#fff';
-      this.#button.style.borderColor = '#4a90d9';
-    }
+  #setMode(mode) {
+    this.#mode = mode;
+    this.#active = mode === 'edit';
 
-    // Attach event listeners on the overlay (which sits on top of the picker canvas)
     const target = this.#overlayCanvas;
-    target.addEventListener('mousedown', this.#boundMouseDown);
-    target.addEventListener('contextmenu', this.#boundContextMenu);
-    target.addEventListener('dragover', this.#boundDragOver);
-    target.addEventListener('drop', this.#boundDrop);
 
-    // Show the overlay
-    this.#overlayCanvas.style.display = 'block';
+    if (mode === 'edit') {
+      // Edit mode: button blue, overlay intercepts clicks for adding/moving points
+      if (this.#button) {
+        this.#button.style.background = '#2a6cb8';
+        this.#button.style.color = '#fff';
+        this.#button.style.borderColor = '#4a90d9';
+        this.#button.textContent = 'RBF: Edit';
+      }
+      target.addEventListener('mousedown', this.#boundMouseDown);
+      target.addEventListener('contextmenu', this.#boundContextMenu);
+      target.addEventListener('dragover', this.#boundDragOver);
+      target.addEventListener('drop', this.#boundDrop);
+      target.style.display = 'block';
+      target.style.pointerEvents = 'auto';
+      this.#renderGradient();
+      this.#renderOverlay();
 
-    // Render the current state (may be empty)
-    this.#renderGradient();
-    this.#renderOverlay();
-  }
+    } else if (mode === 'use') {
+      // Use mode: button green, gradient visible, clicks pass through to pick colors
+      if (this.#button) {
+        this.#button.style.background = '#2a8c3a';
+        this.#button.style.color = '#fff';
+        this.#button.style.borderColor = '#4ad94a';
+        this.#button.textContent = 'RBF: On';
+      }
+      target.removeEventListener('mousedown', this.#boundMouseDown);
+      target.removeEventListener('contextmenu', this.#boundContextMenu);
+      target.removeEventListener('dragover', this.#boundDragOver);
+      target.removeEventListener('drop', this.#boundDrop);
+      document.removeEventListener('mousemove', this.#boundMouseMove);
+      document.removeEventListener('mouseup', this.#boundMouseUp);
+      // Keep overlay visible but let clicks pass through to the picker canvas
+      target.style.display = 'block';
+      target.style.pointerEvents = 'none';
+      // Re-render gradient without point markers
+      this.#renderGradient();
+      // Clear any point markers from the overlay
+      const octx = target.getContext('2d');
+      if (octx) octx.clearRect(0, 0, target.width, target.height);
+      this.#renderGradient();
 
-  /** Exit RBF mode and restore the normal picker. */
-  deactivate() {
-    this.#active = false;
-    if (this.#button) {
-      this.#button.style.background = '';
-      this.#button.style.color = '';
-      this.#button.style.borderColor = '';
+    } else {
+      // Off: hide everything, restore normal picker
+      if (this.#button) {
+        this.#button.style.background = '';
+        this.#button.style.color = '';
+        this.#button.style.borderColor = '';
+        this.#button.textContent = 'RBF';
+      }
+      target.removeEventListener('mousedown', this.#boundMouseDown);
+      target.removeEventListener('contextmenu', this.#boundContextMenu);
+      target.removeEventListener('dragover', this.#boundDragOver);
+      target.removeEventListener('drop', this.#boundDrop);
+      document.removeEventListener('mousemove', this.#boundMouseMove);
+      document.removeEventListener('mouseup', this.#boundMouseUp);
+      target.style.display = 'none';
+      target.style.pointerEvents = 'auto';
+      const picker = this.#state.get('picker');
+      this.#state.set('picker', { ...picker });
     }
-
-    // Remove event listeners
-    const target = this.#overlayCanvas;
-    target.removeEventListener('mousedown', this.#boundMouseDown);
-    target.removeEventListener('contextmenu', this.#boundContextMenu);
-    target.removeEventListener('dragover', this.#boundDragOver);
-    target.removeEventListener('drop', this.#boundDrop);
-
-    // Detach any lingering document-level listeners
-    document.removeEventListener('mousemove', this.#boundMouseMove);
-    document.removeEventListener('mouseup', this.#boundMouseUp);
-
-    // Hide the overlay
-    this.#overlayCanvas.style.display = 'none';
-
-    // Force the normal picker to re-render by touching its state
-    const picker = this.#state.get('picker');
-    this.#state.set('picker', { ...picker });
   }
+
+  /** @deprecated — use toggle() */
+  activate() { this.#setMode('edit'); }
+  deactivate() { this.#setMode('off'); }
 
   // ---- UI setup ------------------------------------------------------------
 

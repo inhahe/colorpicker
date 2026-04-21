@@ -244,7 +244,7 @@ export class HexPicker {
     if (!space) return null;
 
     const N = this.#resolution;
-    const channels = space.channels;
+    const channels = space.components;
 
     // Map col -> X-axis component, row -> Y-axis component
     const xCh = channels[picker.xAxis];
@@ -407,7 +407,7 @@ export class HexPicker {
     }
 
     const N = this.#resolution;
-    const channels = space.channels;
+    const channels = space.components;
     const xCh = channels[picker.xAxis];
     const yCh = channels[picker.yAxis];
 

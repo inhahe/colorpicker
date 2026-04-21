@@ -25,6 +25,12 @@ All conversions route through XYZ. The 2D picker and sliders work with every mod
 - **Crosshair** tracks the current color position
 - **Square aspect ratio** maintained, auto-resizes to fit panel
 - **Coordinate rotation** — two sliders (Rot1, Rot2) tilt the slice plane through 3D color space to see diagonal cross-sections that don't exist on axis-aligned slices
+  - **Line tool**: click "Line" and drag on the 2D picker to set rotation from a visual axis
+  - **2 Colors tool**: click "2 Colors", then pick two colors — the rotation aligns the slice to both
+  - **Reset**: clears rotation back to axis-aligned
+  - Slider gradients update in real time to reflect the rotated axes (★ marks affected components)
+  - **Shift+drag in the 3D viewer** also rotates the slice plane interactively
+  - The 3D viewer shows a **semi-transparent slice plane** visualization (tessellated for cylindrical spaces like HSB/HSL/LCh)
 - **RBF gradient mode** — click "RBF" to place arbitrary color points, the entire 2D surface is filled via thin-plate spline radial basis function interpolation
 - Keyboard: **R** to rotate axes
 
@@ -170,6 +176,9 @@ Interactive WebGL visualization of any color space:
 - **Palette** button — shows current palette as a 3D trace
 - **Image** button — load an image to show its color distribution (persists across space changes, x to clear)
 - **Dual** checkbox — renders two color spaces side by side with labels
+- **Perspective slider** — smoothly blends between orthographic (0) and perspective (1) projection
+- **Shift+drag** — rotates the 2D picker's slice plane angles interactively
+- **Slice plane visualization** — semi-transparent blue quad showing the current 2D picker slice; tessellated for cylindrical spaces so it follows the surface curvature
 - **Stereo 3D modes**: Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Blue/Amber, Cross-eyed, Parallel
 
 ## Panel Layout

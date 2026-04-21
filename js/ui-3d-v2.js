@@ -412,13 +412,10 @@ export class ColorSpace3D {
   }
 
   #syncCanvasSize() {
-    // Use the wrapper's size, not the canvas's, to avoid feedback loops
+    // Fill the full container — no forced square
     const wrap = this.#canvas.parentElement;
-    const available = wrap ? [wrap.clientWidth, wrap.clientHeight] : [250, 250];
-    // Fit square into available space
-    const size = Math.max(50, Math.min(available[0], available[1]));
-    const w = size;
-    const h = size;
+    const w = Math.max(50, wrap ? wrap.clientWidth : 250);
+    const h = Math.max(50, wrap ? wrap.clientHeight : 250);
     if (this.#canvas.width !== w || this.#canvas.height !== h) {
       this.#canvas.width = w;
       this.#canvas.height = h;
@@ -636,8 +633,15 @@ export class ColorSpace3D {
 
     wrap.appendChild(canvas);
     wrap.appendChild(labelCanvas);
+    // Hint line
+    const hint = document.createElement('div');
+    hint.style.cssText =
+      'font-size:10px;color:var(--text-dim,#666);padding:0 4px 2px;';
+    hint.textContent = 'Shift+drag to rotate coordinate slice';
+
     root.appendChild(header);
     root.appendChild(controls);
+    root.appendChild(hint);
     root.appendChild(wrap);
 
     this.#container.appendChild(root);
@@ -1006,16 +1010,19 @@ export class ColorSpace3D {
     if (!space) return;
 
     // Convert current color to this space
-    const vals = this.#engine.convert(color.sourceValues, color.sourceSpace, this.#spaceId);
+    let vals;
+    try {
+      vals = this.#engine.convert(color.sourceValues, color.sourceSpace, this.#spaceId);
+    } catch { return; }
     const comps = space.components;
 
     // Map to 3D position (cylindrical or cube)
     const pos = valueTo3D(vals, comps, this.#spaceId);
 
-    // Clamp
+    // Clamp tightly to the unit cube/cylinder
     for (let i = 0; i < 3; i++) {
       if (!isFinite(pos[i])) pos[i] = 0;
-      pos[i] = Math.max(-1.5, Math.min(1.5, pos[i]));
+      pos[i] = Math.max(-1.0, Math.min(1.0, pos[i]));
     }
 
     // Marker: a single point drawn large with white + glow halo
@@ -1324,6 +1331,9 @@ export class ColorSpace3D {
     this.#drawLines(this.#cubeVAO, mvp);
     this.#drawPoints(this.#cloudVAO, mvp, this.#pointSize);
 
+    // Draw the 2D picker's slice plane as a semi-transparent quad
+    this.#drawSlicePlane(gl, mvp);
+
     if (this.#traceVAO && this.#traceVAO.count >= 2) {
       this.#drawLineStrip(this.#traceVAO, mvp);
       this.#drawPoints(this.#traceVAO, mvp, 6.0);
@@ -1332,11 +1342,14 @@ export class ColorSpace3D {
     if (this.#markerVAO && this.#markerVAO.count > 0) {
       gl.useProgram(this.#program);
       gl.uniformMatrix4fv(this.#uMVP, false, mvp);
-      gl.uniform1f(this.#uPointSize, 16.0);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniform1f(this.#uPointSize, 10.0);
       this.#bindVAO(this.#program, this.#markerVAO);
       gl.drawArrays(gl.POINTS, 0, 1);
-      gl.uniform1f(this.#uPointSize, 8.0);
+      gl.uniform1f(this.#uPointSize, 5.0);
       gl.drawArrays(gl.POINTS, 1, 1);
+      gl.disable(gl.BLEND);
     }
   }
 
@@ -1388,6 +1401,137 @@ export class ColorSpace3D {
     ctx.fillStyle = '#bbc';
     ctx.fillText(primaryName, cw / 4, 4);
     ctx.fillText(secondaryName, cw * 3 / 4, 4);
+  }
+
+  /** Draw the 2D picker's current slice plane — only when rotation is active.
+   *  Tessellated into a grid so the surface follows the curvature of cylindrical
+   *  colour spaces (HSB, HSL, LCh) where hue maps to an angle.  For cube spaces
+   *  the extra triangles are harmless (they still lie on a flat plane). */
+  #drawSlicePlane(gl, mvp) {
+    const picker = this.#state.get('picker');
+    if (picker.spaceId !== this.#spaceId) return;
+    // Only show the plane when rotation is non-zero — otherwise it's just an axis-aligned
+    // slice which isn't interesting to visualize, and it jumps around as sliders reconfigure
+    const r1 = picker.rotAngle1 || 0;
+    const r2 = picker.rotAngle2 || 0;
+    if (Math.abs(r1) < 0.5 && Math.abs(r2) < 0.5) return;
+
+    const space = this.#engine.spaces.get(this.#spaceId);
+    if (!space) return;
+
+    const rot1 = r1 * Math.PI / 180;
+    const rot2 = r2 * Math.PI / 180;
+    const comps = space.components;
+
+    // Center of the plane: midpoint of X and Y ranges, excluded at its current value.
+    // This is a FIXED position based on the picker config, not the current color.
+    const center = [0, 0, 0];
+    const xRange = comps[picker.xAxis].range;
+    const yRange = comps[picker.yAxis].range;
+    const eRange = comps[picker.excluded].range;
+    center[picker.xAxis]   = (xRange[0] + xRange[1]) / 2;
+    center[picker.yAxis]   = (yRange[0] + yRange[1]) / 2;
+    center[picker.excluded] = picker.excludedValue != null
+      ? picker.excludedValue
+      : (eRange[0] + eRange[1]) / 2;
+
+    const c1 = Math.cos(rot1), s1 = Math.sin(rot1);
+    const c2 = Math.cos(rot2), s2 = Math.sin(rot2);
+
+    const xHalf = (xRange[1] - xRange[0]) / 2;
+    const yHalf = (yRange[1] - yRange[0]) / 2;
+    const eHalf = (eRange[1] - eRange[0]) / 2;
+
+    // Axis vectors in (xAxis, yAxis, excluded) local space
+    const axX = [c1 * xHalf, 0, s1 * eHalf];
+    const axY = [0, c2 * yHalf, s2 * eHalf];
+
+    // --- Tessellate into an N×N grid so cylindrical mapping stays smooth ---
+    const N = CYLINDER_SPACES[this.#spaceId] ? 16 : 2; // only need subdivision for cylinders
+    const grid = [];  // (N+1)×(N+1) array of 3D positions
+
+    for (let iy = 0; iy <= N; iy++) {
+      const sy = (iy / N) * 2 - 1; // -1 … +1
+      for (let ix = 0; ix <= N; ix++) {
+        const sx = (ix / N) * 2 - 1;
+        const vals = [...center];
+        vals[picker.xAxis]    += sx * axX[0] + sy * axY[0];
+        vals[picker.yAxis]    += sx * axX[1] + sy * axY[1];
+        vals[picker.excluded] += sx * axX[2] + sy * axY[2];
+
+        // Clamp to valid component ranges so the plane clips to the volume
+        for (let k = 0; k < 3; k++) {
+          vals[k] = Math.max(comps[k].range[0], Math.min(comps[k].range[1], vals[k]));
+        }
+
+        const pos = valueTo3D(vals, comps, this.#spaceId);
+        grid.push(pos[0], pos[1], pos[2]);
+      }
+    }
+
+    // Build triangle list from the grid (2 triangles per cell)
+    const stride = N + 1;
+    const triPositions = [];
+    for (let iy = 0; iy < N; iy++) {
+      for (let ix = 0; ix < N; ix++) {
+        const i00 = (iy * stride + ix) * 3;
+        const i10 = (iy * stride + ix + 1) * 3;
+        const i01 = ((iy + 1) * stride + ix) * 3;
+        const i11 = ((iy + 1) * stride + ix + 1) * 3;
+
+        // Triangle 1: (00, 10, 11)
+        triPositions.push(
+          grid[i00], grid[i00+1], grid[i00+2],
+          grid[i10], grid[i10+1], grid[i10+2],
+          grid[i11], grid[i11+1], grid[i11+2],
+        );
+        // Triangle 2: (00, 11, 01)
+        triPositions.push(
+          grid[i00], grid[i00+1], grid[i00+2],
+          grid[i11], grid[i11+1], grid[i11+2],
+          grid[i01], grid[i01+1], grid[i01+2],
+        );
+      }
+    }
+
+    const vertexCount = triPositions.length / 3;
+    const positions = new Float32Array(triPositions);
+    const colors = new Float32Array(vertexCount * 4);
+    for (let i = 0; i < vertexCount; i++) {
+      colors[i * 4]     = 0.3;
+      colors[i * 4 + 1] = 0.5;
+      colors[i * 4 + 2] = 0.9;
+      colors[i * 4 + 3] = 0.35;
+    }
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+
+    // Create temporary buffers
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);
+    const posLoc = gl.getAttribLocation(this.#program, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STREAM_DRAW);
+    const colLoc = gl.getAttribLocation(this.#program, 'a_color');
+    gl.enableVertexAttribArray(colLoc);
+    gl.vertexAttribPointer(colLoc, 4, gl.FLOAT, false, 0, 0);
+
+    gl.useProgram(this.#program);
+    gl.uniformMatrix4fv(this.#uMVP, false, mvp);
+    gl.uniform1f(this.#uPointSize, 1.0);
+    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+
+    gl.deleteBuffer(posBuf);
+    gl.deleteBuffer(colBuf);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
   }
 
   #buildMVP(w, h, eyeOffset = 0) {
@@ -1553,11 +1697,20 @@ export class ColorSpace3D {
       const dy = e.clientY - this.#lastMouse[1];
       this.#lastMouse = [e.clientX, e.clientY];
 
-      this.#rotY += dx * 0.008;
-      this.#rotX += dy * 0.008;
-
-      // Clamp vertical rotation to avoid flipping
-      this.#rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.#rotX));
+      if (e.shiftKey) {
+        // Shift+drag: rotate the 2D picker's slice plane
+        const rot1 = (this.#state.get('picker.rotAngle1') || 0) + dx * 0.5;
+        const rot2 = (this.#state.get('picker.rotAngle2') || 0) - dy * 0.5;
+        this.#state.batch({
+          'picker.rotAngle1': Math.max(-180, Math.min(180, Math.round(rot1))),
+          'picker.rotAngle2': Math.max(-180, Math.min(180, Math.round(rot2))),
+        });
+      } else {
+        // Normal drag: rotate the camera view
+        this.#rotY += dx * 0.008;
+        this.#rotX += dy * 0.008;
+        this.#rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.#rotX));
+      }
 
       this.#markDirty();
     });
@@ -1635,6 +1788,14 @@ export class ColorSpace3D {
           this.#markDirty();
         }
       })
+    );
+
+    // Rotation angle or excluded-value changes from the 2D picker controls
+    // -> redraw the slice plane in the 3D view
+    this.#unsubs.push(
+      this.#state.subscribe('picker.rotAngle1', () => this.#markDirty()),
+      this.#state.subscribe('picker.rotAngle2', () => this.#markDirty()),
+      this.#state.subscribe('picker.excludedValue', () => this.#markDirty()),
     );
 
     // Saved colors -> update trace if we are showing it
