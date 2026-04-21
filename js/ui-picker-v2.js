@@ -310,13 +310,76 @@ export class Picker2D {
       : (e) => this.#pickFromPointer(e);
     pick(evt);
 
+    const canvas = this.#canvas;
+    const rect = canvas.getBoundingClientRect();
+    let dragChip = null;
+    let outsideDrag = false;
+
     const onMove = (e) => {
       if (!this.#dragging) return;
       e.preventDefault();
-      pick(e);
+
+      const mx = e.clientX, my = e.clientY;
+      const inside = mx >= rect.left && mx <= rect.right &&
+                     my >= rect.top && my <= rect.bottom;
+
+      if (inside && !outsideDrag) {
+        // Inside the canvas: keep picking colors
+        pick(e);
+      } else {
+        // Outside the canvas: switch to drag mode with a floating color chip
+        if (!outsideDrag) {
+          outsideDrag = true;
+          const color = this.#state.get('currentColor');
+          const hex = this.#engine.toHex(color.sourceValues, color.sourceSpace);
+          dragChip = document.createElement('div');
+          dragChip.style.cssText =
+            `position:fixed;width:24px;height:24px;background:${hex};` +
+            `border:2px solid #fff;border-radius:4px;pointer-events:none;z-index:10000;`;
+          dragChip.dataset.colorHex = hex;
+          document.body.appendChild(dragChip);
+        }
+        if (dragChip) {
+          dragChip.style.left = (mx - 12) + 'px';
+          dragChip.style.top = (my - 12) + 'px';
+        }
+        // Highlight any drop target under the cursor
+        const target = document.elementFromPoint(mx, my);
+        document.querySelectorAll('.drop-highlight').forEach(el =>
+          el.classList.remove('drop-highlight'));
+        if (target?.closest?.('.gradient-swatch, #current-swatch, #saved-colors-strip')) {
+          target.closest('.gradient-swatch, #current-swatch, #saved-colors-strip')
+            .classList.add('drop-highlight');
+        }
+      }
     };
-    const onUp = () => {
+
+    const onUp = (e) => {
       this.#dragging = false;
+      document.querySelectorAll('.drop-highlight').forEach(el =>
+        el.classList.remove('drop-highlight'));
+
+      if (outsideDrag && dragChip) {
+        // Find drop target and deliver the color
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const hex = dragChip.dataset.colorHex;
+        dragChip.remove();
+
+        if (target && hex) {
+          // Simulate a drop by dispatching a synthetic drop event with the hex
+          const dropTarget = target.closest?.(
+            '.gradient-swatch, #current-swatch, #saved-colors-strip, #palette-canvas'
+          );
+          if (dropTarget) {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', hex);
+            dropTarget.dispatchEvent(new DragEvent('drop', {
+              bubbles: true, dataTransfer: dt, clientX: e.clientX, clientY: e.clientY,
+            }));
+          }
+        }
+      }
+
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.removeEventListener('touchmove', onMove);

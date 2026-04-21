@@ -40,4 +40,3 @@ copy /Y "%SRC%\copy-to-github.bat" "%DST%\copy-to-github.bat"
 
 echo.
 echo Done. %DST% is ready for git push.
-pause
