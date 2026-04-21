@@ -238,12 +238,13 @@
         <button class="tool-btn" id="btn-palette-from-image">From Image</button>
         <button class="tool-btn" id="btn-palette-load-preview" title="Load a 256-color image to preview with this palette">Preview Image</button>
         <button class="tool-btn" id="btn-palette-from-saved" title="Create palette from saved colors via spline interpolation">From Saved</button>
-        <select id="palette-shape-mode" class="tool-btn" style="padding:0 4px;" title="Shape tool for drawing on 2D picker">
-          <option value="freehand">Draw: Free</option>
-          <option value="line">Draw: Line</option>
-          <option value="rect">Draw: Rect</option>
-          <option value="ellipse">Draw: Ellipse</option>
-          <option value="polygon">Draw: Polygon</option>
+        <select id="palette-shape-mode" class="tool-btn" style="padding:0 4px;" title="Draw a shape on the 2D picker to create a palette">
+          <option value="" disabled selected>Draw on Picker...</option>
+          <option value="freehand">Freehand</option>
+          <option value="line">Line</option>
+          <option value="rect">Rectangle</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="polygon">Polygon</option>
         </select>
         <button class="tool-btn" id="btn-palette-curves" title="Draw RGB/HSB curves to define palette">Curves</button>
         <button class="tool-btn" id="btn-palette-save">Save</button>

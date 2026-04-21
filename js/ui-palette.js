@@ -376,8 +376,9 @@ export class PaletteEditor {
     const shapeSelect = $('palette-shape-mode');
     shapeSelect?.addEventListener('change', () => {
       const mode = shapeSelect.value;
-      shapeSelect.value = shapeSelect.options[0].value; // reset visual
+      if (!mode) return; // placeholder selected
       this._toggleShapeDrawOnPicker(mode);
+      shapeSelect.selectedIndex = 0; // reset back to "Draw on Picker..." placeholder
     });
     $('btn-palette-curves')?.addEventListener('click', () => this._onCurvesDialog());
 
@@ -1681,7 +1682,7 @@ export class PaletteEditor {
       // deltaY magnitude is typically 100 for one notch (pixel mode) or 3
       // for line mode, so normalize to roughly 1-4 indices per notch.
       const raw = e.deltaMode === 1 ? e.deltaY * 8 : e.deltaY; // line→pixel
-      const advance = raw / 25;  // ~4 indices per wheel notch
+      const advance = -raw / 25;  // scroll up = forward, scroll down = backward
       const oldIdx = Math.floor(palIndex);
       palIndex = Math.max(0, Math.min(PALETTE_SIZE, palIndex + advance));
       const newIdx = Math.floor(palIndex);
@@ -1917,6 +1918,15 @@ export class PaletteEditor {
       if (clicks.length >= 3) finishShape();
     };
 
+    // Right-click also finishes polygon (easier than double-click)
+    const onContextMenu = (e) => {
+      if (mode !== 'polygon') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (clicks.length >= 3) finishShape();
+    };
+    pickerCanvas.addEventListener('contextmenu', onContextMenu, true);
+
     const onMove = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1946,7 +1956,24 @@ export class PaletteEditor {
         e.preventDefault();
         this._endDrawMode();
       }
+      // Enter also finishes polygon
+      if (e.key === 'Enter' && mode === 'polygon' && clicks.length >= 3) {
+        e.preventDefault();
+        finishShape();
+      }
     };
+
+    // Show a hint for polygon mode
+    let hintEl = null;
+    if (mode === 'polygon') {
+      hintEl = document.createElement('div');
+      hintEl.style.cssText =
+        'position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:10000;' +
+        'padding:4px 12px;border-radius:4px;font:11px/1.3 sans-serif;' +
+        'background:rgba(0,0,0,0.7);color:#fff;pointer-events:none;';
+      hintEl.textContent = 'Click to add vertices. Double-click, right-click, or Enter to finish. Escape to cancel.';
+      document.body.appendChild(hintEl);
+    }
 
     pickerCanvas.addEventListener('mousedown', onDown, true);
     pickerCanvas.addEventListener('dblclick', onDblClick, true);
@@ -1957,10 +1984,12 @@ export class PaletteEditor {
     this._drawCleanup = () => {
       pickerCanvas.removeEventListener('mousedown', onDown, true);
       pickerCanvas.removeEventListener('dblclick', onDblClick, true);
+      pickerCanvas.removeEventListener('contextmenu', onContextMenu, true);
       document.removeEventListener('mousemove', onMove, true);
       document.removeEventListener('mouseup', onUp, true);
       document.removeEventListener('keydown', onKeyDown, true);
       pickerCanvas.style.cursor = '';
+      if (hintEl) hintEl.remove();
     };
   }
 

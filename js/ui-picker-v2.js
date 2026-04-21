@@ -1172,9 +1172,14 @@ export class ColorSliders {
       let values;
 
       if (rotAxes) {
-        // Move along the rotated axis from the center
+        // Move along the rotated axis from a stable center.
+        // Reset THIS component to its range midpoint so the gradient doesn't
+        // shift when you drag this slider (matches non-rotated behavior where
+        // the dragged slider's own gradient is independent of its value).
         const tNorm = t * 2 - 1; // -1 to 1
         values = [...currentValues];
+        const midVal = (comp.range[0] + comp.range[1]) / 2;
+        values[componentIndex] = midVal;
         values[rotPicker.xAxis]    += tNorm * rotAxes[0];
         values[rotPicker.yAxis]    += tNorm * rotAxes[1];
         values[rotPicker.excluded] += tNorm * rotAxes[2];
