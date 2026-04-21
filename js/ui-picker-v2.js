@@ -73,6 +73,10 @@ export class Picker2D {
   #rafId = 0;
   #dragging = false;
 
+  // Rotation overlay
+  #rotOverlay = null;
+  #rotCtx = null;
+
   // Unsubscribe handles
   #unsubs = [];
 
@@ -103,6 +107,9 @@ export class Picker2D {
     if (panelBody) ro.observe(panelBody);
     // Defer first sync to let the layout settle
     requestAnimationFrame(() => this.#syncCanvasSize());
+
+    // Create rotation overlay canvas (sits on top, shown only when rotated)
+    this.#createRotOverlay();
 
     // Mouse interaction
     this.#canvas.addEventListener('mousedown', (e) => this.#onPointerDown(e));
@@ -186,6 +193,27 @@ export class Picker2D {
     const picker = this.#state.get('picker');
     const space = this.#engine.spaces.get(picker.spaceId);
     if (!space) return;
+
+    const rotated = this.#isRotated();
+
+    if (rotated) {
+      // Show overlay, render rotated gradient on it
+      if (this.#rotOverlay) {
+        this.#rotOverlay.style.display = 'block';
+        // Sync overlay size
+        if (this.#rotOverlay.width !== this.#canvas.width ||
+            this.#rotOverlay.height !== this.#canvas.height) {
+          this.#rotOverlay.width = this.#canvas.width;
+          this.#rotOverlay.height = this.#canvas.height;
+        }
+        this.#renderRotatedCPU(picker, space);
+      }
+      this.#positionCrosshairRotated();
+      return;
+    }
+
+    // Hide overlay when not rotated
+    if (this.#rotOverlay) this.#rotOverlay.style.display = 'none';
 
     if (this.#glRenderer?.isReady) {
       // GPU path: single draw call renders the entire gradient
@@ -276,12 +304,16 @@ export class Picker2D {
 
   #onPointerDown(evt) {
     this.#dragging = true;
-    this.#pickFromPointer(evt);
+    const rotated = this.#isRotated();
+    const pick = rotated
+      ? (e) => this.#pickFromPointerRotated(e)
+      : (e) => this.#pickFromPointer(e);
+    pick(evt);
 
     const onMove = (e) => {
       if (!this.#dragging) return;
       e.preventDefault();
-      this.#pickFromPointer(e);
+      pick(e);
     };
     const onUp = () => {
       this.#dragging = false;
@@ -337,6 +369,13 @@ export class Picker2D {
   }
 
   #onColorChange() {
+    // When rotated, the plane is always centered on the current color,
+    // so just re-render. No excluded-value sync needed.
+    if (this.#isRotated()) {
+      this.#scheduleRender();
+      return;
+    }
+
     // When the color changes from an external source (hex input, eyedropper,
     // collection click, etc.), sync the excluded value so the 2D picker
     // shows a slice that contains the current color.
@@ -357,6 +396,173 @@ export class Picker2D {
       }
     }
     this.#positionCrosshair();
+  }
+
+  // -- Rotation overlay -------------------------------------------------------
+
+  #isRotated() {
+    const picker = this.#state.get('picker');
+    return Math.abs(picker.rotAngle1 || 0) > 0.5 || Math.abs(picker.rotAngle2 || 0) > 0.5;
+  }
+
+  #createRotOverlay() {
+    const container = this.#canvas.parentElement;
+    if (!container) return;
+    const overlay = document.createElement('canvas');
+    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:none;z-index:1;';
+    container.appendChild(overlay);
+    this.#rotOverlay = overlay;
+    this.#rotCtx = overlay.getContext('2d');
+
+    // Sync size
+    const syncSize = () => {
+      const w = this.#canvas.width;
+      const h = this.#canvas.height;
+      if (overlay.width !== w || overlay.height !== h) {
+        overlay.width = w;
+        overlay.height = h;
+      }
+    };
+    const ro = new ResizeObserver(syncSize);
+    ro.observe(this.#canvas);
+    syncSize();
+
+    // Mouse interaction on overlay
+    overlay.addEventListener('mousedown', (e) => this.#onPointerDown(e));
+    overlay.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      this.#onPointerDown(e);
+    }, { passive: false });
+  }
+
+  #computeRotatedAxes(picker, space) {
+    const a1 = (picker.rotAngle1 || 0) * Math.PI / 180;
+    const a2 = (picker.rotAngle2 || 0) * Math.PI / 180;
+    const comps = space.components;
+    const xHalf = (comps[picker.xAxis].range[1] - comps[picker.xAxis].range[0]) / 2;
+    const yHalf = (comps[picker.yAxis].range[1] - comps[picker.yAxis].range[0]) / 2;
+    const eHalf = (comps[picker.excluded].range[1] - comps[picker.excluded].range[0]) / 2;
+
+    const c1 = Math.cos(a1), s1 = Math.sin(a1);
+    const c2 = Math.cos(a2), s2 = Math.sin(a2);
+
+    // axisX/axisY are 3-vectors in (xAxis, yAxis, excluded) local space,
+    // scaled by component half-ranges so t in [-1,+1] spans the full range.
+    // Rotation 1 tilts X toward excluded; Rotation 2 tilts Y toward excluded.
+    const axisX = [c1 * xHalf, 0, s1 * eHalf];
+    const axisY = [0, c2 * yHalf, s2 * eHalf];
+
+    return { axisX, axisY };
+  }
+
+  #renderRotatedCPU(picker, space) {
+    const overlay = this.#rotOverlay;
+    if (!overlay) return;
+
+    // Render at reduced resolution for performance, then scale up
+    const RES = 128;
+    const { axisX, axisY } = this.#computeRotatedAxes(picker, space);
+
+    const color = this.#state.get('currentColor');
+    const center = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+
+    const imageData = this.#rotCtx.createImageData(RES, RES);
+    const data = imageData.data;
+
+    for (let py = 0; py < RES; py++) {
+      const tY = (py / (RES - 1)) * 2 - 1;
+      const yFlip = picker.reversed.y ? tY : -tY; // top=max by default
+      for (let px = 0; px < RES; px++) {
+        const tX = (px / (RES - 1)) * 2 - 1;
+        const xFlip = picker.reversed.x ? -tX : tX;
+
+        const values = [0, 0, 0];
+        values[picker.xAxis]   = center[picker.xAxis]   + xFlip * axisX[0] + yFlip * axisY[0];
+        values[picker.yAxis]   = center[picker.yAxis]   + xFlip * axisX[1] + yFlip * axisY[1];
+        values[picker.excluded] = center[picker.excluded] + xFlip * axisX[2] + yFlip * axisY[2];
+
+        const [r, g, b] = this.#engine.toSRGB(values, picker.spaceId);
+        const idx = (py * RES + px) * 4;
+        data[idx] = r; data[idx+1] = g; data[idx+2] = b; data[idx+3] = 255;
+      }
+    }
+
+    // Draw at low res, then stretch to full canvas with smoothing
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = RES; tmpCanvas.height = RES;
+    const tmpCtx = tmpCanvas.getContext('2d');
+    tmpCtx.putImageData(imageData, 0, 0);
+
+    const w = overlay.width, h = overlay.height;
+    this.#rotCtx.imageSmoothingEnabled = true;
+    this.#rotCtx.drawImage(tmpCanvas, 0, 0, w, h);
+  }
+
+  #positionCrosshairRotated() {
+    const picker = this.#state.get('picker');
+    const space = this.#engine.spaces.get(picker.spaceId);
+    if (!space) return;
+
+    const { axisX, axisY } = this.#computeRotatedAxes(picker, space);
+    const color = this.#state.get('currentColor');
+    const center = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+    const values = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+
+    // delta from center in each local axis
+    const dx = values[picker.xAxis] - center[picker.xAxis];
+    const dy = values[picker.yAxis] - center[picker.yAxis];
+
+    // For the center point itself, delta is 0 => crosshair at canvas center
+    const cw = this.#canvas.clientWidth || this.#canvas.width;
+    const ch = this.#canvas.clientHeight || this.#canvas.height;
+
+    // Project: solve for tX, tY from the axis vectors (least-squares 2-component)
+    const lenXsq = axisX[0]*axisX[0] + axisX[1]*axisX[1];
+    const lenYsq = axisY[0]*axisY[0] + axisY[1]*axisY[1];
+    let tX = lenXsq > 1e-10 ? (dx * axisX[0] + dy * axisX[1]) / lenXsq : 0;
+    let tY = lenYsq > 1e-10 ? (dx * axisY[0] + dy * axisY[1]) / lenYsq : 0;
+
+    if (picker.reversed.x) tX = -tX;
+    if (!picker.reversed.y) tY = -tY;
+
+    const px = clamp((tX + 1) / 2 * cw, 0, cw);
+    const py = clamp((tY + 1) / 2 * ch, 0, ch);
+
+    this.#crosshair.style.left = `${px}px`;
+    this.#crosshair.style.top = `${py}px`;
+  }
+
+  #pickFromPointerRotated(evt) {
+    const target = this.#rotOverlay || this.#canvas;
+    const { x, y } = canvasPos(target, evt);
+    const picker = this.#state.get('picker');
+    const space = this.#engine.spaces.get(picker.spaceId);
+    if (!space) return;
+
+    const rect = target.getBoundingClientRect();
+    const w = rect.width || target.width;
+    const h = rect.height || target.height;
+
+    let tX = (x / w) * 2 - 1;
+    let tY = (y / h) * 2 - 1;
+    if (picker.reversed.x) tX = -tX;
+    if (!picker.reversed.y) tY = -tY;
+
+    const { axisX, axisY } = this.#computeRotatedAxes(picker, space);
+    const color = this.#state.get('currentColor');
+    const center = this.#engine.convert(color.xyz, 'xyz', picker.spaceId);
+
+    const values = [0, 0, 0];
+    values[picker.xAxis]   = center[picker.xAxis]   + tX * axisX[0] + tY * axisY[0];
+    values[picker.yAxis]   = center[picker.yAxis]   + tX * axisX[1] + tY * axisY[1];
+    values[picker.excluded] = center[picker.excluded] + tX * axisX[2] + tY * axisY[2];
+
+    const xyz = this.#engine.convert(values, picker.spaceId, 'xyz');
+    this.#state.set('currentColor', {
+      xyz,
+      sourceSpace: picker.spaceId,
+      sourceValues: values,
+    });
   }
 }
 
@@ -1265,12 +1471,22 @@ export class PickerControls {
       reverseXBtn,
       reverseYBtn,
       rotateBtn,
+      rot1,
+      rot2,
     } = elements;
 
     // Populate space select
     this.#populateSpaceSelect();
 
-    // Space change
+    // Rotation sliders
+    if (rot1) rot1.addEventListener('input', () => {
+      this.#state.set('picker.rotAngle1', parseFloat(rot1.value));
+    });
+    if (rot2) rot2.addEventListener('input', () => {
+      this.#state.set('picker.rotAngle2', parseFloat(rot2.value));
+    });
+
+    // Space change — reset rotation angles
     spaceSelect.addEventListener('change', () => {
       const spaceId = spaceSelect.value;
       const space = this.#engine.spaces.get(spaceId);
@@ -1283,6 +1499,8 @@ export class PickerControls {
         excluded: 0,
         excludedValue: space.components[0].defaultValue,
         reversed: { x: false, y: false },
+        rotAngle1: 0,
+        rotAngle2: 0,
       });
     });
 
@@ -1343,6 +1561,8 @@ export class PickerControls {
         yAxis: newY,
         excluded: newExcluded,
         excludedValue: newExcludedVal,
+        rotAngle1: 0,
+        rotAngle2: 0,
       });
     });
 
@@ -1387,6 +1607,10 @@ export class PickerControls {
       }
       selectEl.value = currentVal;
     }
+
+    // Sync rotation sliders
+    if (this.#elements.rot1) this.#elements.rot1.value = picker.rotAngle1 || 0;
+    if (this.#elements.rot2) this.#elements.rot2.value = picker.rotAngle2 || 0;
   }
 
   #updateAxes(changedAxis, newIndex) {

@@ -66,6 +66,13 @@
         <button id="btn-rotate-picker" class="small-btn" title="Rotate axes">&#10227; Rotate</button>
       </div>
       <span class="palette-separator"></span>
+      <label class="picker-rot-label" title="Rotate slice plane around first axis (tilt X toward fixed axis)">
+        Rot1: <input type="range" id="picker-rot1" min="-180" max="180" value="0" style="width:50px;">
+      </label>
+      <label class="picker-rot-label" title="Rotate slice plane around second axis (tilt Y toward fixed axis)">
+        Rot2: <input type="range" id="picker-rot2" min="-180" max="180" value="0" style="width:50px;">
+      </label>
+      <span class="palette-separator"></span>
       <button id="btn-save-picker" class="small-btn" title="Save current picker config">Save View</button>
       <select id="picker-saved-views" class="small-btn" title="Load a saved picker view"><option value="">-- Saved Views --</option></select>
     </div>

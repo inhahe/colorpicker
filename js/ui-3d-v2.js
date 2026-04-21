@@ -59,6 +59,22 @@ function mat4Perspective(fovYRad, aspect, near, far) {
   return out;
 }
 
+/** Orthographic projection (column-major). */
+function mat4Ortho(left, right, bottom, top, near, far) {
+  const out = new Float32Array(16);
+  const lr = 1 / (left - right);
+  const bt = 1 / (bottom - top);
+  const nf = 1 / (near - far);
+  out[0]  = -2 * lr;
+  out[5]  = -2 * bt;
+  out[10] = 2 * nf;
+  out[12] = (left + right) * lr;
+  out[13] = (top + bottom) * bt;
+  out[14] = (far + near) * nf;
+  out[15] = 1;
+  return out;
+}
+
 /** LookAt view matrix (column-major). */
 function mat4LookAt(eye, center, up) {
   let zx = eye[0] - center[0];
@@ -320,6 +336,7 @@ export class ColorSpace3D {
   #spaceId = 'srgb';
   #density = 15;
   #pointSize = 3.0;
+  #perspective = 0;  // 0 = orthographic, 1 = full perspective
   #stereoMode = 'off';  // 'off' | 'anaglyph' | 'crosseyed'
   #dirty = true;
   #rafId = 0;
@@ -564,8 +581,26 @@ export class ColorSpace3D {
       this.#markDirty();
     });
 
+    // Perspective slider
+    const perspWrap = document.createElement('label');
+    perspWrap.style.cssText = 'display:flex;align-items:center;gap:3px;font-size:10px;color:#888;';
+    perspWrap.textContent = 'Persp:';
+    const perspSlider = document.createElement('input');
+    perspSlider.type = 'range';
+    perspSlider.min = '0';
+    perspSlider.max = '100';
+    perspSlider.value = '0';
+    perspSlider.title = 'Perspective amount (0 = orthographic, 100 = full perspective)';
+    perspSlider.style.cssText = 'width:40px;accent-color:#4a90d9;';
+    perspSlider.addEventListener('input', () => {
+      this.#perspective = parseInt(perspSlider.value, 10) / 100;
+      this.#markDirty();
+    });
+    perspWrap.appendChild(perspSlider);
+
     controls.appendChild(densityWrap);
     controls.appendChild(sizeWrap);
+    controls.appendChild(perspWrap);
     controls.appendChild(stereoSelect);
     controls.appendChild(imgBtn);
     controls.appendChild(palBtn);
@@ -1357,10 +1392,33 @@ export class ColorSpace3D {
 
   #buildMVP(w, h, eyeOffset = 0) {
     const aspect = w / h;
-    // Slightly widen FOV when aspect is narrow (stereo/dual views) to avoid clipping
+    // Perspective slider: 0 = orthographic, 1 = full perspective (45° FOV)
+    // Key: maintain consistent apparent size across all perspective values
+    // by computing the ortho bounds to match what perspective would show at this zoom
+    const p = this.#perspective;
     const baseFov = 45 * Math.PI / 180;
-    const fov = aspect < 0.8 ? baseFov * Math.sqrt(0.8 / aspect) : baseFov;
-    const proj = mat4Perspective(Math.min(fov, 80 * Math.PI / 180), aspect, 0.1, 100.0);
+    // At full perspective, the visible half-height at the origin is: zoom * tan(fov/2)
+    const visH = this.#zoom * Math.tan(baseFov / 2);
+    let proj;
+    if (p < 0.01) {
+      // Pure orthographic — match the size of the full-perspective view
+      proj = mat4Ortho(-visH * aspect, visH * aspect, -visH, visH, 0.1, 100.0);
+    } else {
+      // Perspective with FOV scaled by p — smaller p = less distortion
+      const fov = baseFov * p;
+      const adjFov = aspect < 0.8 ? fov * Math.sqrt(0.8 / aspect) : fov;
+      // Adjust zoom so apparent size stays constant: newZoom = visH / tan(fov/2)
+      const adjZoom = visH / Math.tan(Math.max(adjFov, 0.001) / 2);
+      proj = mat4Perspective(Math.max(adjFov, 0.001), aspect, 0.1, adjZoom * 3);
+      // Override the eye position for this frame to maintain size
+      const eye2 = [eyeOffset, 0, adjZoom];
+      const view = mat4LookAt(eye2, [0, 0, 0], [0, 1, 0]);
+      const rotX = mat4RotateX(this.#rotX);
+      const rotY = mat4RotateY(this.#rotY);
+      const model = mat4Multiply(rotX, rotY);
+      const mv = mat4Multiply(view, model);
+      return mat4Multiply(proj, mv);
+    }
     const eye = [eyeOffset, 0, this.#zoom];
     const view = mat4LookAt(eye, [0, 0, 0], [0, 1, 0]);
     const rotX = mat4RotateX(this.#rotX);

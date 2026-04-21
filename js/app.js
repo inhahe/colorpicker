@@ -647,6 +647,8 @@ class App {
         reverseXBtn: $('btn-reverse-x'),
         reverseYBtn: $('btn-reverse-y'),
         rotateBtn: $('btn-rotate-picker'),
+        rot1: $('picker-rot1'),
+        rot2: $('picker-rot2'),
       },
       this.state,
       this.engine

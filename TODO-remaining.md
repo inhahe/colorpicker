@@ -5,11 +5,9 @@
 1. ~~**ICC Profile Support**~~ ✅ DONE
    - Parses ICC binary, extracts matrix + TRC, registers as color space
 
-2. **Arbitrary Coordinate System Rotation** (todo lines 123-134) — Large
-   - Rotate the 2D picker's slice plane through 3D color space
-   - Define rotation by: drawing a line on the 2D surface, selecting two colors,
-     rotating a plane in the 3D viewer, or showing a cube with a rotatable slice
-   - Show the cube wireframe in white extending beyond the color space bounds
+2. ~~**Arbitrary Coordinate System Rotation**~~ ✅ DONE
+   - Two rotation sliders tilt the 2D picker's slice plane through 3D color space
+   - CPU-rendered on overlay canvas at 128x128, mouse picking with inverse rotation
 
 3. ~~**RBF-based 2D Gradient Extrapolation**~~ ✅ DONE
    - Thin-plate spline RBF, Gaussian elimination solver, overlay rendering

@@ -32,6 +32,8 @@ export const DEFAULT_STATE = Object.freeze({
     excluded: 0,
     excludedValue: 0,
     reversed: { x: false, y: false },
+    rotAngle1: 0,
+    rotAngle2: 0,
   },
 
   savedColors: [],

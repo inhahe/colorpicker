@@ -24,6 +24,8 @@ All conversions route through XYZ. The 2D picker and sliders work with every mod
 - **Axis controls**: dropdown selectors for X/Y/excluded, swap, reverse, rotate buttons
 - **Crosshair** tracks the current color position
 - **Square aspect ratio** maintained, auto-resizes to fit panel
+- **Coordinate rotation** — two sliders (Rot1, Rot2) tilt the slice plane through 3D color space to see diagonal cross-sections that don't exist on axis-aligned slices
+- **RBF gradient mode** — click "RBF" to place arbitrary color points, the entire 2D surface is filled via thin-plate spline radial basis function interpolation
 - Keyboard: **R** to rotate axes
 
 ## Hexagonal Color Picker
@@ -146,6 +148,15 @@ All shapes show a live preview overlay. Press Escape to cancel.
 - **Export** as PNG, JPEG, BMP (256x32 image), JSON, or GIMP Palette (.gpl)
 - BMP export builds the file byte-by-byte (no canvas dependency)
 
+## ICC Profile Support
+
+Load ICC/ICM profile files to add custom color spaces:
+- Parses ICC binary format (header, tag table, matrix, TRC)
+- Supports matrix-based RGB profiles (monitors, scanners)
+- Handles curv (gamma, LUT) and para (parametric) tone response curves
+- Loaded profile registers as a new color space with sliders, 2D picker, 3D viewer
+- **ICC Profile** button in toolbar opens file picker
+
 ## 3D Color Space Viewer
 
 Interactive WebGL visualization of any color space:
@@ -159,7 +170,7 @@ Interactive WebGL visualization of any color space:
 - **Palette** button — shows current palette as a 3D trace
 - **Image** button — load an image to show its color distribution (persists across space changes, x to clear)
 - **Dual** checkbox — renders two color spaces side by side with labels
-- **Stereo 3D modes**: Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Cross-eyed, Parallel
+- **Stereo 3D modes**: Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Blue/Amber, Cross-eyed, Parallel
 
 ## Panel Layout
 
@@ -192,7 +203,8 @@ Interactive WebGL visualization of any color space:
 
 ## Technical
 
-- **15,000+ lines** of pure HTML/CSS/JS — zero external dependencies, no build tools
+- **16,000+ lines** of pure HTML/CSS/JS — zero external dependencies, no build tools
+- 16 ES modules: app, color-engine, state, gl-renderer, ui-picker, ui-3d, ui-palette, ui-harmony, ui-hex-picker, ui-rbf-gradient, ui-icc, ui-info, ui-output, collections
 - ES modules loaded natively by the browser
 - WebGL fragment shaders for GPU-accelerated 2D picker and slider rendering
 - All 10 color space conversions implemented in both JavaScript and GLSL
