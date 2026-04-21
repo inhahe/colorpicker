@@ -300,6 +300,7 @@ export class PaletteEditor {
       this.el.btnExport.addEventListener('click', () => this._onExportPalette());
     }
 
+
     // Rotation slider
     if (this.el.rotationSlider) {
       this.el.rotationSlider.min = '0';
@@ -528,8 +529,51 @@ export class PaletteEditor {
       return;
     }
 
-    // Plain click on the palette strip: pick that color
-    this._pickColorAtIndex(idx);
+    // Click or drag: if the user drags more than 5px, it becomes a color drag.
+    // If they release without moving, it's a click (pick that color).
+    const startX = e.clientX, startY = e.clientY;
+    const actualIdx = (idx + this.rotation) % PALETTE_SIZE;
+    const off = actualIdx * 3;
+    const pr = this.palette[off], pg = this.palette[off + 1], pb = this.palette[off + 2];
+    const hex = '#' + [pr, pg, pb].map(c => c.toString(16).padStart(2, '0')).join('');
+    let dragging = false;
+    let dragEl = null;
+
+    const onMove = (me) => {
+      const dx = me.clientX - startX, dy = me.clientY - startY;
+      if (!dragging && (dx * dx + dy * dy) > 25) {
+        dragging = true;
+        dragEl = document.createElement('div');
+        dragEl.style.cssText = `position:fixed;width:24px;height:24px;background:${hex};border:2px solid #fff;border-radius:4px;pointer-events:none;z-index:10000;`;
+        document.body.appendChild(dragEl);
+      }
+      if (dragEl) {
+        dragEl.style.left = (me.clientX - 12) + 'px';
+        dragEl.style.top = (me.clientY - 12) + 'px';
+      }
+    };
+    const onUp = (me) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (dragEl) dragEl.remove();
+      if (dragging) {
+        // Dropped somewhere — set that color as current
+        try {
+          const parsed = this.engine.fromHex(hex);
+          const xyz = this.engine.convert(parsed.values, 'srgb', 'xyz');
+          this.state.batch({
+            'currentColor.xyz': xyz,
+            'currentColor.sourceSpace': 'srgb',
+            'currentColor.sourceValues': parsed.values,
+          });
+        } catch {}
+        return;
+      }
+      // Not a drag — treat as click (pick color)
+      this._pickColorAtIndex(idx);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 
   _onCanvasContextMenu(e) {

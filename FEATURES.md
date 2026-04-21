@@ -1,6 +1,6 @@
 # Ultimate Color Picker — Feature Reference
 
-## Color Models (9 active + XYZ hub)
+## Color Models (10 active + XYZ hub)
 
 | Model | Components | Range | Notes |
 |-------|-----------|-------|-------|
@@ -12,10 +12,10 @@
 | Adobe RGB | R, G, B | 0-255 | Wider gamut (~50% of visible) |
 | CMY | C, M, Y | 0-255 | Subtractive primaries |
 | LMS | L, M, S | 0-1 | Stockman & Sharpe 2-deg cone fundamentals |
-| Color Opponent | YB, RG, Br | -100..100, -100..100, 0-100 | Neural opponent channels (Yellow-Blue, Red-Green, Brightness) |
+| Color Opponent | YB, RG, Br | -50..50, -30..30, 0-100 | Neural opponent channels (Yellow-Blue, Red-Green, Brightness) |
 | CIE XYZ | X, Y, Z | ~0-1.1 | Internal hub space (1931 2-deg observer) |
 
-All conversions route through XYZ. The 2D picker and sliders work with every model.
+All conversions route through XYZ. The 2D picker and sliders work with every model. Multi-column layout when the panel is wide enough.
 
 ## 2D Color Picker
 
@@ -23,132 +23,80 @@ All conversions route through XYZ. The 2D picker and sliders work with every mod
 - **Auto-reconfigures** when you drag a slider: the dragged component becomes the depth axis, the other two become X and Y
 - **Axis controls**: dropdown selectors for X/Y/excluded, swap, reverse, rotate buttons
 - **Crosshair** tracks the current color position
+- **Square aspect ratio** maintained, auto-resizes to fit panel
 - Keyboard: **R** to rotate axes
 
-## Color Sliders (Left Panel)
+## Hexagonal Color Picker
 
-- Shows all 8 color models simultaneously with gradient canvases
+A flat-top hexagonal grid of color swatches in its own panel:
+- **Resolution slider** (4-32) — controls hex grid density
+- Uses the same color space and axis configuration as the 2D picker
+- Click any hexagon to select that color
+- Hover highlights hexagons, current color gets a white border
+- Auto-resizes with its panel
+
+## Color Sliders
+
+- Shows all 10 color models simultaneously with gradient canvases
 - Each slider has a draggable thumb, number input, and quick-value buttons
 - Add/remove models via the "+" button and toggle dialog
 - Sliders auto-update when the color changes from any source
+- Multi-column layout — wraps into 2-3 columns when the panel is wide
 
-## Current Color Display (Bottom Bar)
+## Color / Hex / CSS Panel
 
-- **Swatch** — split diagonally: top-left = displayed sRGB, bottom-right = intended color
+- **Swatch** — split diagonally: top-left = displayed sRGB, bottom-right = intended color. Draggable.
 - **Hex input** — type or paste hex values (#RGB or #RRGGBB)
 - **Copy/Paste buttons** — clipboard integration
-- **Quick color buttons** — black, white, R, G, B, Y, M, C
+- **Quick color buttons** — black, white, R, G, B, Y, M, C (clickable and draggable)
+- **CSS formats** — HEX, RGB, HSL, LAB — each click-to-copy with green flash
+- **WCAG contrast checker** — contrast ratios against white and black text with AAA/AA/Fail ratings
+- **Nearest named color** — closest CSS named color with swatch
 
-## CSS Color Formats (Bottom Bar)
+## Saved Colors / History / Collections Panel
 
-Shows the current color in multiple CSS-ready formats, each click-to-copy:
-- **HEX** — `#4A90D9`
-- **RGB** — `rgb(74, 144, 217)`
-- **HSL** — `hsl(211, 68%, 57%)`
-- **LAB** — `lab(59.6% -5.2 -38.4)`
+- **Saved colors**: click "+ Save", click to select, Ctrl+click to delete, right-click context menu, drag to reorder, draggable to other targets
+- **Color history**: last 30 colors, recorded on mouse-up, click to restore, draggable, x to clear
+- **Standard collections**: CSS Named (148), Web-Safe 216, Material Design (190), RAL Classic, Pastels, Visible Spectrum, Grayscale
 
-Clicking any format copies it to the clipboard with a green flash.
-
-## WCAG Contrast Checker (Bottom Bar)
-
-Shows contrast ratios for the current color against white and black text:
-- Displays sample "Aa" text on the color background
-- Shows the contrast ratio (e.g., `4.5:1`)
-- WCAG level: **AAA** (7:1+), **AA** (4.5:1+), **AA Large** (3:1+), or **Fail**
-
-## Nearest Named Color (Bottom Bar)
-
-Shows the closest CSS named color to the current selection (e.g., "~steelblue") with a small swatch. Exact matches drop the tilde.
-
-## Saved Colors
-
-- Click **"+ Save"** to save the current color
-- Click a saved color to select it
-- **Ctrl+click** to delete
-- **Right-click** for context menu (use, copy hex, rename, delete)
-- **Drag to reorder**
-- Persists across sessions via localStorage
-- Saved colors store exact values in the original color model
-
-## Standard Collections
-
-Dropdown with 7 built-in collections:
-- CSS Named Colors (148)
-- Web-Safe 216
-- Material Design (190)
-- RAL Classic
-- Pastels (24)
-- Visible Spectrum (81 wavelength samples)
-- Grayscale (32 steps)
-
-Click any swatch to select that color.
-
-## Color Harmony (Right Panel)
+## Color Harmony
 
 Shows harmony suggestions that update live:
-- **Complementary** — hue + 180deg
-- **Split Complementary** — hue +/- 150deg
-- **Triadic** — hue + 120deg / 240deg
-- **Tetradic Square** — hue + 90deg / 180deg / 270deg
-- **Tetradic Rectangular** — hue + 60deg / 180deg / 240deg
-- **Analogous** — hue +/- 30deg / 60deg
-
-Each swatch is clickable and draggable. "Save All" adds all harmony colors to saved colors.
+- Complementary, Split Complementary, Triadic, Tetradic Square, Tetradic Rectangular, Analogous
+- Each swatch is clickable and draggable. "Save All" adds all to saved colors.
 
 ## Two-Color Gradient
 
-Toggle via **Gradient** button in toolbar or **G** key.
-- Click each endpoint swatch to set from the current color
-- Gradient is interpolated in L\*a\*b\* for perceptual uniformity
-- Click anywhere on the gradient bar to pick an intermediate color
+Toggle via **Gradient** button or **G** key. Interpolated in L\*a\*b\*.
 
 ## Three-Color Triangle
 
-Toggle via **Triangle** button in toolbar or **T** key.
-- Click each corner swatch to set from the current color
-- Triangle uses barycentric interpolation in L\*a\*b\*
-- Click inside the triangle to pick a color
+Toggle via **Triangle** button or **T** key. Barycentric interpolation in L\*a\*b\*.
 
-## Info Panel (Right Panel)
+## Color Info Panel
 
-- **Color model info**: description, key equations (monospace), gamut coverage, uniformity rating
-- **CIE xy chromaticity diagram**: spectral locus, gamut triangles, current color marker
-- **Cone response chart**: L/M/S sensitivity curves (380-780nm)
-- **Accuracy meters**: Delta E 2000 display with 3 switchable meter groups (Original, HSB, LMS)
-
-## Gamut Shading on Sliders
-
-Each color slider in the left panel shows visual markers at gamut boundaries:
-- **Green dashed line** — transition from undisplayable to displayable
-- **Orange dashed line** — transition from displayable to undisplayable
-- **Red solid line** — imaginary color boundary (negative cone response)
-- Undisplayable regions are subtly dimmed, imaginary regions are red-tinted
+- Color model description, key equations, gamut coverage, uniformity rating
+- CIE xy chromaticity diagram with gamut triangles
+- Cone response chart (L/M/S curves, 380-780nm)
+- Display accuracy meters (Delta E 2000, HSB, LMS groups)
 
 ## Saved Picker Views
 
-- **Save View** button saves the current 2D picker configuration (space, axes, excluded value)
-- **Saved Views dropdown** lets you quickly restore any saved configuration
-- Views persist in localStorage across sessions
+- **Save View** saves the current 2D picker configuration (space, axes, excluded value)
+- **Saved Views dropdown** restores any saved configuration
+- Persists in localStorage
 
 ## Drag and Drop
 
-Drag colors between any UI areas:
-
-**Drag from:**
-- 2D picker canvas (drags the current color)
-- Any color slider canvas
-- Saved color swatches
-- Standard collection swatches
-- Color harmony swatches
+**Drag from:** current color swatch, saved colors, history swatches, quick color buttons, collection swatches, harmony swatches
 
 **Drop onto:**
-- Current color swatch (sets the color)
-- Saved colors strip (adds to saved)
-- Palette editor canvas (adds a control point at the drop position)
+- Current color swatch — sets the color
+- Saved colors strip — adds to saved
+- Palette editor canvas — adds a control point at the drop position
+- 2D picker — changes the excluded dimension to match the dropped color
 
-Visual feedback: drop targets highlight with a dashed blue outline during drag.
-
-**Drop onto 2D picker**: changes the excluded dimension to match the dropped color, so the 2D picker shows a slice containing that color.
+Visual feedback: drop targets highlight with a dashed blue outline.
 
 ## Eyedropper
 
@@ -160,20 +108,14 @@ Toggle via **Palette Editor** button in toolbar.
 
 ### Creating Palettes
 - **New** — cycles through presets: Rainbow, Grayscale, Heat, Cool, Random
+- **Random** — configurable number of random control points (3-32)
 - **From Image** — median cut quantization (Heckbert 1982) extracts 256 representative colors
-- **Random** — generates a random palette with a configurable number of control points (3-32). Each click produces a unique palette.
 - **From Saved** — creates a palette from saved colors via spline interpolation
-- **Curves** — draw individual R/G/B (or H/S/B) curves in a curves dialog, like a photo editor. Click to add control points, drag to reshape, right-click to remove. Catmull-Rom interpolation between points.
+- **Curves** — draw R/G/B or H/S/B curves in a curves dialog with control points
 - **Preview Image** — loads an image and maps it to palette indices for cycling preview
 
-### Editing
-- **Control points** — right-click to add, shift+click to remove, drag to reposition
-- **Spline modes** — Catmull-Rom (smooth), Linear, Bezier (dropdown selector)
-- All interpolation done in L\*a\*b\* for perceptual uniformity
-- **Selection mode** — click "Select" button, then click+drag on the palette to highlight a range (shown in blue). Then use Cut/Copy/Paste buttons to manipulate the selection. Paste resamples if the destination is a different size.
-
 ### Shape Drawing on 2D Picker
-Dropdown with 5 shape modes for creating palettes from the 2D color picker:
+Dropdown with 5 shape modes:
 - **Freehand** — draw freely, colors sampled along the path
 - **Line** — click two points, colors sampled along the line
 - **Rectangle** — click two corners, colors sampled around the perimeter
@@ -181,62 +123,51 @@ Dropdown with 5 shape modes for creating palettes from the 2D color picker:
 - **Polygon** — click vertices, double-click to close, colors sampled along edges
 All shapes show a live preview overlay. Press Escape to cancel.
 
+### Editing
+- **Control points** — right-click to add, shift+click to remove, drag to reposition
+- **Spline modes** — Catmull-Rom (smooth), Linear, Bezier
+- All interpolation in L\*a\*b\* for perceptual uniformity
+- **Selection mode** — click+drag to select a range, then Cut/Copy/Paste
+
 ### Adjustments
-- **Hue shift** (+/- 30deg) — rotates hue in HSB space
-- **Saturation** (+/- 15) — adjusts saturation in HSB space
-- **Brightness** (+/- 10 L\*) — adjusts lightness in L\*a\*b\*
-- **Reverse** — reverses palette order
-- **Smooth** — averages neighboring colors
-- **Channel Mix** — 3x3 RGB matrix with presets (Identity, Grayscale, Sepia, Swap R/B, Invert). Clip or normalize modes.
+- **Hue shift** (+/- 30deg), **Saturation** (+/- 15), **Brightness** (+/- 10 L\*)
+- **Reverse**, **Smooth**, **Channel Mix** (3x3 RGB matrix with presets)
 
 ### Blending
-- **Blend** — pick two saved palettes and slide between them (interpolated in L\*a\*b\*)
-- Preview image updates live during blend
+- **Blend** — slide between two saved palettes (interpolated in L\*a\*b\*)
 
 ### Animation
-- **Rotate** slider (0-255) — shifts the palette display
-- **Animate** slider — continuous rotation at adjustable speed
-- With a preview image loaded, this creates classic palette cycling animation
-
-### Draw on Picker
-Click **"Draw on Picker"** to enter drawing mode:
-- Draw a freehand path on the 2D color picker with the mouse
-- The path is visualized as a white line with green (start) and red (end) markers
-- On mouse-up, the path is sampled at 256 equal arc-length intervals
-- Each sample becomes one palette entry — the color at that position on the 2D picker
-- Creates 12 control points for further editing
-- Click the button again (now labeled "Stop Drawing") to cancel
+- **Rotate** slider (0-255) + **Animate** slider for continuous rotation
+- With a preview image loaded, creates classic palette cycling animation
+- Preview image shows with x button to dismiss
 
 ### Import/Export
 - **Save/Load** palettes by name (persisted in localStorage)
 - **Export** as PNG, JPEG, BMP (256x32 image), JSON, or GIMP Palette (.gpl)
 - BMP export builds the file byte-by-byte (no canvas dependency)
 
-## 3D Color Space Viewer (Right Panel)
+## 3D Color Space Viewer
 
 Interactive WebGL visualization of any color space:
-- **Point cloud** of sample colors showing the shape of the space
-- **Density slider** — adjust point count (8-28 grid steps)
-- **Size slider** — adjust point radius (1-8 pixels)
-- Out-of-gamut points drawn smaller and dimmer
-- **Current color marker** shown as a larger white point
-- **Palette trace** drawn as a colored line strip through 3D space
+- **Point cloud** with adjustable density (8-28) and point size (1-8)
 - **Wireframe**: cube for rectangular spaces, **cylinder** for HSB/HSL/LCh (hue = angle)
-- Cylindrical view uses area-compensated sampling (no radial spoke artifacts)
-- **Axis labels**: component names for cubes, cardinal hue angles (0/90/180/270deg) for cylinders
+- Cylindrical view uses Fibonacci spiral sampling (no radial spoke artifacts)
+- **Axis labels**: component names for cubes, cardinal hue angles for cylinders
+- **Current color marker** (glowing white point)
 - **Drag** to rotate, **scroll** to zoom
-- **Dropdown** to switch which color space is visualized
-- **Stereo 3D modes** (dropdown): Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Cross-eyed, Parallel
-- **Palette trace** button shows the current 256-color palette as a 3D line through any color space
-- **Dual-space view** checkbox renders two color spaces side by side for comparison
-- **Image button** — load any image to show its color distribution as a 3D point cloud. See where an image's colors live in any color space.
+- **Dropdown** to switch color space
+- **Palette** button — shows current palette as a 3D trace
+- **Image** button — load an image to show its color distribution (persists across space changes, x to clear)
+- **Dual** checkbox — renders two color spaces side by side with labels
+- **Stereo 3D modes**: Mono, Red/Cyan, Blue/Yellow, Magenta/Green, Cross-eyed, Parallel
 
-## Color History (Bottom Bar)
+## Panel Layout
 
-Tracks the last 30 colors you've picked as tiny swatches:
-- Records on mouse-up (end of drag), not during slider movement
-- Click any history swatch to restore that color
-- **x** button to clear the history
+- **Draggable panels** — grab title bar to move, drop above/below any panel or past edges to create new columns
+- **Resizable** — drag dividers between columns, drag row dividers between stacked panels, right-edge handles on every column, left-edge handle with margin
+- **Layout persists** in localStorage
+- **Reset Layout** button restores default arrangement
+- **Export Layout** downloads positions as JSON
 
 ## Keyboard Shortcuts
 
@@ -257,15 +188,17 @@ Tracks the last 30 colors you've picked as tiny swatches:
 - All settings, saved colors, and palettes persist via localStorage
 - **Clean Slate** resets to defaults but preserves saved colors and palettes
 - **Undo/Redo** stack (max 100 entries) for color and picker changes
+- Corrupted state (zero XYZ) auto-detected and reset on load
 
 ## Technical
 
-- 10,000+ lines of pure HTML/CSS/JS — zero dependencies, no build tools
+- **15,000+ lines** of pure HTML/CSS/JS — zero external dependencies, no build tools
 - ES modules loaded natively by the browser
-- WebGL fragment shaders for GPU-accelerated 2D picker rendering
-- All 9 color space conversions implemented in both JavaScript and GLSL
+- WebGL fragment shaders for GPU-accelerated 2D picker and slider rendering
+- All 10 color space conversions implemented in both JavaScript and GLSL
 - Full CIEDE2000 Delta E implementation
 - Stockman & Sharpe cone fundamentals (89 data points, 390-830nm)
 - CIE 1931 color matching functions (81 data points, 380-780nm)
-- Responsive layout (1000px and 600px breakpoints)
+- Custom drag-and-drop panel layout system (no framework)
+- No-cache development server (server.py)
 - Dark theme with CSS custom properties

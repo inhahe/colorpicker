@@ -13,9 +13,11 @@ import { InfoPanel, AccuracyMeters } from './ui-info.js';
 import { SavedColorsUI, CollectionsUI } from './collections.js';
 import { PaletteEditor } from './ui-palette.js';
 import { ColorHarmony } from './ui-harmony.js';
-import { ColorSpace3D } from './ui-3d.js';
+import { ColorSpace3D } from './ui-3d-v2.js';
 import { ColorOutput } from './ui-output.js';
 import { HexPicker } from './ui-hex-picker.js';
+import { RBFGradient } from './ui-rbf-gradient.js';
+import { ICCManager } from './ui-icc.js';
 
 // ============================================================================
 // Bootstrap
@@ -585,6 +587,13 @@ class App {
       this.engine
     );
 
+    // --- RBF Gradient (place color points for 2D interpolation) ---
+    this.rbfGradient = new RBFGradient(
+      $('picker-canvas'),
+      this.state,
+      this.engine
+    );
+
     // --- Axis sliders along picker edges ---
     this.axisSliders = new AxisSliders(
       $('picker-x-slider'),
@@ -753,6 +762,9 @@ class App {
       this.state,
       this.engine
     );
+
+    // --- ICC profile manager ---
+    this.iccManager = new ICCManager(this.state, this.engine);
 
     // --- Color history ---
     this._colorHistory = [];
@@ -1031,9 +1043,15 @@ class App {
           try {
             const parsed = this.engine.fromHex(hex);
             this._setColorFromSpace(parsed.values, parsed.spaceId);
-          } catch {
-            // Invalid hex in data attribute — ignore
-          }
+          } catch {}
+        }
+      });
+      btn.draggable = true;
+      btn.addEventListener('dragstart', (e) => {
+        const hex = btn.dataset.color;
+        if (hex) {
+          e.dataTransfer.setData('text/plain', hex);
+          e.dataTransfer.effectAllowed = 'copy';
         }
       });
     });
@@ -1145,7 +1163,8 @@ class App {
     }
 
     // --- C. Drop color onto 2D picker — changes excluded dimension to match ---
-    const pickerCanvas = document.getElementById('picker-canvas');
+    // Listen on the container (not just the canvas) since overlays may intercept events
+    const pickerCanvas = document.getElementById('picker-canvas-container') || document.getElementById('picker-canvas');
     if (pickerCanvas) {
       pickerCanvas.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -1294,6 +1313,11 @@ class App {
           'currentColor.sourceSpace': entry.sourceSpace,
           'currentColor.sourceValues': [...entry.sourceValues],
         });
+      });
+      swatch.draggable = true;
+      swatch.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', entry.hex);
+        e.dataTransfer.effectAllowed = 'copy';
       });
       this._historyStrip.appendChild(swatch);
     }
