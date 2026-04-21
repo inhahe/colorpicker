@@ -1539,7 +1539,7 @@ export class PaletteEditor {
   _drawCleanup = null;
   _shapeMode = null; // current shape tool: 'freehand','line','rect','ellipse','polygon'
 
-  _toggleDrawOnPicker() {
+  _toggleDrawOnPicker(wheelOnly = false) {
     if (this._drawModeActive) {
       this._endDrawMode();
       return;
@@ -1562,6 +1562,7 @@ export class PaletteEditor {
     let drawing = false;
     let palIndex = 0;      // current palette write position (float)
     let cursorPt = null;    // latest mouse position for color sampling
+    let exhaustionRate = 1.0; // wheel-mode: indices per pixel of travel
 
     // Floating indicator shows current palette index
     const rateIndicator = document.createElement('div');
@@ -1611,7 +1612,13 @@ export class PaletteEditor {
 
     const updateIndicator = (e) => {
       const idx = Math.max(0, Math.min(Math.floor(palIndex), PALETTE_SIZE - 1));
-      rateIndicator.textContent = `${idx}/${PALETTE_SIZE}`;
+      if (wheelOnly) {
+        const display = exhaustionRate < 0.1 ? exhaustionRate.toFixed(3)
+          : exhaustionRate < 10 ? exhaustionRate.toFixed(2) : exhaustionRate.toFixed(1);
+        rateIndicator.textContent = `${idx}/${PALETTE_SIZE} \u00d7${display}`;
+      } else {
+        rateIndicator.textContent = `${idx}/${PALETTE_SIZE}`;
+      }
       rateIndicator.style.left = (e.clientX + 16) + 'px';
       rateIndicator.style.top = (e.clientY - 20) + 'px';
     };
@@ -1642,34 +1649,54 @@ export class PaletteEditor {
       const rect = pickerCanvas.getBoundingClientRect();
       const newPt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
 
-      // Advance palette index by pixel distance traveled (baseline: 1 index
-      // per pixel).  Scroll wheel provides additional fast advancement on top.
-      if (cursorPt) {
-        const dx = newPt.x - cursorPt.x;
-        const dy = newPt.y - cursorPt.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const oldIdx = Math.floor(palIndex);
-        palIndex = Math.min(PALETTE_SIZE, palIndex + dist * 0.5);
-        const newIdx = Math.floor(palIndex);
-        // Fill all slots between old and new
-        for (let i = oldIdx; i <= newIdx && i < PALETTE_SIZE; i++) {
-          // Interpolate position along this segment
-          const frac = dist > 0 ? Math.min(1, (i - oldIdx) / Math.max(1, newIdx - oldIdx)) : 1;
-          const px = cursorPt.x + dx * frac;
-          const py = cursorPt.y + dy * frac;
-          const rgb = getPickerColor(px, py) || [0, 0, 0];
-          const off = i * 3;
-          this.palette[off] = rgb[0];
-          this.palette[off + 1] = rgb[1];
-          this.palette[off + 2] = rgb[2];
+      if (wheelOnly) {
+        // Wheel mode: mouse advances by distance × exhaustionRate, wheel changes rate
+        if (cursorPt) {
+          const dx = newPt.x - cursorPt.x;
+          const dy = newPt.y - cursorPt.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const oldIdx = Math.floor(palIndex);
+          palIndex = Math.min(PALETTE_SIZE, palIndex + dist * exhaustionRate);
+          const newIdx = Math.floor(palIndex);
+          for (let i = oldIdx; i <= newIdx && i < PALETTE_SIZE; i++) {
+            const frac = dist > 0 ? Math.min(1, (i - oldIdx) / Math.max(1, newIdx - oldIdx)) : 1;
+            const px = cursorPt.x + dx * frac;
+            const py = cursorPt.y + dy * frac;
+            const rgb = getPickerColor(px, py) || [0, 0, 0];
+            const off = i * 3;
+            this.palette[off] = rgb[0];
+            this.palette[off + 1] = rgb[1];
+            this.palette[off + 2] = rgb[2];
+          }
         }
+        cursorPt = newPt;
+        this._markDirty();
+      } else {
+        // Auto mode: advance palette index by distance traveled
+        if (cursorPt) {
+          const dx = newPt.x - cursorPt.x;
+          const dy = newPt.y - cursorPt.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const oldIdx = Math.floor(palIndex);
+          palIndex = Math.min(PALETTE_SIZE, palIndex + dist * 0.5);
+          const newIdx = Math.floor(palIndex);
+          for (let i = oldIdx; i <= newIdx && i < PALETTE_SIZE; i++) {
+            const frac = dist > 0 ? Math.min(1, (i - oldIdx) / Math.max(1, newIdx - oldIdx)) : 1;
+            const px = cursorPt.x + dx * frac;
+            const py = cursorPt.y + dy * frac;
+            const rgb = getPickerColor(px, py) || [0, 0, 0];
+            const off = i * 3;
+            this.palette[off] = rgb[0];
+            this.palette[off + 1] = rgb[1];
+            this.palette[off + 2] = rgb[2];
+          }
+        }
+        cursorPt = newPt;
+        this._markDirty();
       }
 
-      cursorPt = newPt;
-      this._drawPath.push({ ...cursorPt });
-
+      this._drawPath.push({ ...newPt });
       updateIndicator(e);
-      this._markDirty();
       this._drawPathOverlay();
     };
 
@@ -1678,24 +1705,19 @@ export class PaletteEditor {
       e.preventDefault();
       e.stopPropagation();
 
-      // Scroll wheel directly advances / retreats the palette index.
-      // deltaY magnitude is typically 100 for one notch (pixel mode) or 3
-      // for line mode, so normalize to roughly 1-4 indices per notch.
-      const raw = e.deltaMode === 1 ? e.deltaY * 8 : e.deltaY; // line→pixel
-      const advance = -raw / 25;  // scroll up = forward, scroll down = backward
-      const oldIdx = Math.floor(palIndex);
-      palIndex = Math.max(0, Math.min(PALETTE_SIZE, palIndex + advance));
-      const newIdx = Math.floor(palIndex);
-
-      // Fill every slot between old and new position with the color under
-      // the cursor — forward or backward.
-      if (cursorPt) {
-        const lo = Math.min(oldIdx, newIdx);
-        const hi = Math.max(oldIdx, newIdx);
-        for (let i = lo; i <= hi && i < PALETTE_SIZE; i++) {
-          writeSlot(i);
-        }
-        this._markDirty();
+      if (wheelOnly) {
+        // Wheel mode: scroll changes the exhaustion rate (speed of palette consumption)
+        const direction = Math.sign(e.deltaY);
+        exhaustionRate *= Math.pow(1.3, -direction); // scroll up = faster
+        exhaustionRate = Math.max(0.01, Math.min(20, exhaustionRate));
+        const display = exhaustionRate < 0.1
+          ? exhaustionRate.toFixed(3)
+          : exhaustionRate < 10
+            ? exhaustionRate.toFixed(2)
+            : exhaustionRate.toFixed(1);
+        rateIndicator.textContent = `\u00d7${display}`;
+      } else {
+        // Auto mode: no wheel effect (palette advances by distance only)
       }
 
       updateIndicator(e);
@@ -1829,8 +1851,8 @@ export class PaletteEditor {
       this._endDrawMode();
       if (wasMode === mode) return; // toggle off same mode
     }
-    if (mode === 'freehand') {
-      this._toggleDrawOnPicker();
+    if (mode === 'freehand' || mode === 'freewheel') {
+      this._toggleDrawOnPicker(mode === 'freewheel');
       return;
     }
     const pickerCanvas = document.getElementById('picker-canvas');

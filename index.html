@@ -240,7 +240,8 @@
         <button class="tool-btn" id="btn-palette-from-saved" title="Create palette from saved colors via spline interpolation">From Saved</button>
         <select id="palette-shape-mode" class="tool-btn" style="padding:0 4px;" title="Draw a shape on the 2D picker to create a palette">
           <option value="" disabled selected>Draw on Picker...</option>
-          <option value="freehand">Freehand</option>
+          <option value="freehand" title="Draw on the 2D picker to fill the palette at a fixed rate">Freehand (auto)</option>
+          <option value="freewheel" title="Draw on the 2D picker to fill the palette; scroll up for faster, scroll down for slower exhaustion">Freehand (wheel)</option>
           <option value="line">Line</option>
           <option value="rect">Rectangle</option>
           <option value="ellipse">Ellipse</option>
