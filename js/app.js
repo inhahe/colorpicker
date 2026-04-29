@@ -432,14 +432,8 @@ class App {
                 main.insertBefore(vDiv, newCol.nextElementSibling);
               }
 
-              // Clean up empty source column
-              if (sourceCol.querySelectorAll('[data-panel-id]').length === 0) {
-                const pd = sourceCol.previousElementSibling;
-                const nd = sourceCol.nextElementSibling;
-                if (pd && pd.style.cursor === 'col-resize') pd.remove();
-                else if (nd && nd.style.cursor === 'col-resize') nd.remove();
-                sourceCol.remove();
-              }
+              // Clean up source column (expand last panel or remove if empty)
+              this._cleanupColumn(sourceCol);
 
               this._saveLayout();
               return;
@@ -469,14 +463,8 @@ class App {
               targetCol.insertBefore(wrap, hd.nextElementSibling);
             }
 
-            // Clean up empty source column
-            if (sourceCol.querySelectorAll('[data-panel-id]').length === 0) {
-              const prevDiv = sourceCol.previousElementSibling;
-              const nextDiv = sourceCol.nextElementSibling;
-              if (prevDiv && prevDiv.style.cursor === 'col-resize') prevDiv.remove();
-              else if (nextDiv && nextDiv.style.cursor === 'col-resize') nextDiv.remove();
-              sourceCol.remove();
-            }
+            // Clean up source column (expand last panel or remove if empty)
+            this._cleanupColumn(sourceCol);
 
             this._saveLayout();
           };
@@ -617,6 +605,46 @@ class App {
       if (col.panels.length > 0) layout.push(col);
     }
     return layout;
+  }
+
+  /**
+   * Clean up a column after a panel has been removed from it.
+   * - If the column is empty, remove it and its adjacent column divider.
+   * - If only one panel remains, expand it to fill the column and remove
+   *   any leftover row dividers so the user isn't left with a dead zone.
+   */
+  _cleanupColumn(colEl) {
+    if (!colEl || !colEl.parentElement) return;
+
+    const panels = colEl.querySelectorAll('[data-panel-id]');
+
+    if (panels.length === 0) {
+      // Empty column — remove it and its adjacent column divider
+      const prevDiv = colEl.previousElementSibling;
+      const nextDiv = colEl.nextElementSibling;
+      if (prevDiv && prevDiv.style.cursor === 'col-resize') prevDiv.remove();
+      else if (nextDiv && nextDiv.style.cursor === 'col-resize') nextDiv.remove();
+      colEl.remove();
+      return;
+    }
+
+    // Remove any orphaned row-resize dividers (e.g. at the edges of the panel list)
+    for (const ch of [...colEl.children]) {
+      if (ch.style.cursor !== 'row-resize') continue;
+      const prev = ch.previousElementSibling;
+      const next = ch.nextElementSibling;
+      const hasPanelBefore = prev && prev.dataset && prev.dataset.panelId;
+      const hasPanelAfter = next && next.dataset && next.dataset.panelId;
+      if (!hasPanelBefore || !hasPanelAfter) {
+        ch.remove();
+      }
+    }
+
+    // If only one panel remains, expand it to fill the entire column
+    if (panels.length === 1) {
+      panels[0].style.flex = '1';
+      panels[0].style.height = '';
+    }
   }
 
   // --------------------------------------------------------------------------
