@@ -538,6 +538,8 @@ export class InfoPanel {
   #diagram = null;
   /** @type {HTMLCanvasElement|null} */
   #diagramCanvas = null;
+  /** @type {HTMLParagraphElement|null} */
+  #diagramCaption = null;
 
   /**
    * @param {{descriptionEl: HTMLElement, equationsEl: HTMLElement, gamutEl: HTMLElement, spaceLabel: HTMLElement}} elements
@@ -663,6 +665,18 @@ export class InfoPanel {
       this.#diagramCanvas.style.cssText = 'display:block; margin-top:8px; border-radius:4px;';
     }
     el.appendChild(this.#diagramCanvas);
+
+    // Caption identifying the reference diagram
+    if (!this.#diagramCaption) {
+      this.#diagramCaption = document.createElement('p');
+      this.#diagramCaption.style.cssText =
+        'margin:4px 0 0 0; font-size:11px; color:#999; line-height:1.4;';
+      this.#diagramCaption.innerHTML =
+        'Plotted on the <strong>CIE 1931 xy chromaticity horseshoe</strong> ' +
+        '(the full gamut of visible color). The overlaid triangle shows the ' +
+        "selected model's coverage within it.";
+    }
+    el.appendChild(this.#diagramCaption);
 
     if (!this.#diagram) {
       this.#diagram = new ChromaticityDiagram(this.#diagramCanvas, this.#engine);

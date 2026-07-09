@@ -133,21 +133,32 @@ export class Picker2D {
     const container = this.#canvas.parentElement;
     if (!rightCol || !container || !pickerArea) return;
 
-    // Use the picker-area's parent (the panel body) as the source of truth
-    // for available space — it's sized by the layout, not by our content.
-    const panelBody = pickerArea.parentElement;
-    if (!panelBody) return;
+    // Measure the real box available for the square directly from the right
+    // column. Its size is dictated by the layout (it stretches to the picker
+    // area's height and flexes to its width), so this stays correct even when
+    // the controls bar wraps to a variable number of rows — no need to
+    // hand-compute the controls-bar height.
+    const GAP = 4; // #picker-right-col gap
+    const xSlider = document.getElementById('picker-x-slider');
+    const excluded = document.getElementById('excluded-slider-container');
 
-    // Available width = panel body width minus Y slider (24px) minus gaps/padding
-    const availW = panelBody.clientWidth - 24 - 16;
-    // Available height = panel body height minus controls bar, X slider, gaps
-    const controlsH = document.getElementById('picker-controls')?.offsetHeight || 30;
-    const reservedH = controlsH + 24 + 12; // controls + X slider + gaps
-    const availH = panelBody.clientHeight - reservedH;
+    // Vertical space reserved inside the column for the sliders below the canvas
+    let reservedH = 0;
+    if (xSlider) reservedH += xSlider.offsetHeight + GAP;
+    if (excluded && excluded.style.display !== 'none') {
+      reservedH += excluded.offsetHeight + GAP;
+    }
 
+    const availW = rightCol.clientWidth;
+    const availH = rightCol.clientHeight - reservedH;
+
+    // Square, clipped so it never grows wider than the pane.
     const size = Math.max(50, Math.min(availW, availH));
 
-    // Size the canvas container
+    // Size the canvas container. Pin flex-shrink so the flex column can't
+    // squash the height independently of the width (which would break the
+    // 1:1 aspect ratio and make the picker grow wide but not tall).
+    container.style.flexShrink = '0';
     container.style.width = size + 'px';
     container.style.height = size + 'px';
 
@@ -156,7 +167,6 @@ export class Picker2D {
     if (ySlider) ySlider.style.height = size + 'px';
 
     // Size the X slider and excluded slider to match canvas width
-    const xSlider = document.getElementById('picker-x-slider');
     if (xSlider) xSlider.style.width = size + 'px';
 
 

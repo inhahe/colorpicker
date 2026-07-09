@@ -536,6 +536,7 @@ class App {
 
       const exportBtn = document.createElement('button');
       exportBtn.className = 'tool-btn';
+      exportBtn.title = 'Export panel layout (positions & sizes) as JSON. Does not include color data (use Export State for that)';
       exportBtn.textContent = 'Export Layout';
       exportBtn.addEventListener('click', () => {
         const blob = new Blob([JSON.stringify(this._getCurrentLayout(), null, 2)], { type: 'application/json' });
@@ -548,6 +549,7 @@ class App {
 
       const importBtn = document.createElement('button');
       importBtn.className = 'tool-btn';
+      importBtn.title = 'Import panel layout (positions & sizes) from JSON. Does not affect color data (use Import State for that)';
       importBtn.textContent = 'Import Layout';
       importBtn.addEventListener('click', () => {
         const input = document.createElement('input');

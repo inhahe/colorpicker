@@ -232,8 +232,8 @@ Interactive WebGL visualization of any color space:
 - All settings, saved colors, and palettes persist via localStorage
 - **Clean Slate** resets to defaults but preserves saved colors and palettes
 - **Undo/Redo** stack (max 100 entries) for color and picker changes
-- **Export Session** — download the entire session as a JSON file
-- **Import Session** — restore a previously exported session from JSON
+- **Export State** — download the entire session (all color data & settings) as a JSON file
+- **Import State** — restore a previously exported session from JSON
 - Corrupted state (zero XYZ) auto-detected and reset on load
 
 ## Technical
