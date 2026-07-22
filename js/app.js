@@ -20,6 +20,25 @@ import { HexPicker } from './ui-hex-picker.js';
 import { RBFGradient } from './ui-rbf-gradient.js';
 import { ICCManager } from './ui-icc.js';
 
+// Every movable panel, with the label shown in the mobile panel manager.
+// Order here is the top-to-bottom order panels appear in the mobile stack.
+const MOBILE_PANELS = [
+  ['panel-picker',        '2D Picker'],
+  ['panel-color-output',  'Color / Hex / CSS'],
+  ['panel-sliders',       'Color Models'],
+  ['panel-saved',         'Saved / History'],
+  ['panel-harmony',       'Harmony'],
+  ['panel-info',          'Color Info'],
+  ['panel-hexpicker',     'Hex Picker'],
+  ['panel-3dview',        '3D View'],
+  ['panel-accuracy',      'Accuracy'],
+];
+// A small, high-value subset is shown by default so each panel is big and fully
+// visible; the rest are one tap away in the panel manager.
+const MOBILE_DEFAULT_ENABLED = [
+  'panel-picker', 'panel-color-output', 'panel-sliders', 'panel-saved',
+];
+
 // ============================================================================
 // Bootstrap
 // ============================================================================
@@ -52,6 +71,15 @@ class App {
     // Build the panel layout
     this._buildLayout();
 
+    // Rebuild if the viewport crosses the desktop/mobile breakpoint (e.g. a
+    // phone rotated from landscape to portrait), so the right layout is used.
+    this._mobileMQ = window.matchMedia('(max-width: 820px)');
+    this._wasMobile = this._mobileMQ.matches;
+    window.addEventListener('resize', () => {
+      const isMobile = this._mobileMQ.matches;
+      if (isMobile !== this._wasMobile) { this._wasMobile = isMobile; this._rebuildLayout(); }
+    });
+
     this._initComponents();
     this._initToolbar();
     this._initKeyboardShortcuts();
@@ -70,9 +98,30 @@ class App {
   // Panel layout — simple flex with draggable dividers, all inline styles
   // --------------------------------------------------------------------------
 
+  /** Tear the current layout down safely (panels are parked on <body>, not
+   *  destroyed) and rebuild for the current viewport. */
+  _rebuildLayout() {
+    for (const [id] of MOBILE_PANELS) {
+      const p = document.getElementById(id);
+      if (p) { document.body.appendChild(p); p.style.display = 'none'; }
+    }
+    document.body.classList.remove('mobile-layout');
+    this._buildLayout();
+    window.dispatchEvent(new Event('resize'));
+  }
+
   _buildLayout() {
     const main = document.getElementById('main-content');
     main.innerHTML = '';
+
+    // On phones / narrow screens, skip the desktop multi-column docking layout
+    // (draggable dividers make no sense on touch) and stack every panel in a
+    // single vertically-scrollable column with collapsible headers.
+    if (window.matchMedia('(max-width: 820px)').matches) {
+      this._buildLayoutMobile(main);
+      return;
+    }
+
     main.style.cssText = 'display:flex;height:100%;overflow:hidden;';
 
     // Default: 3 columns — picker+3D+output | harmony+info+accuracy+saved | sliders
@@ -579,6 +628,127 @@ class App {
       });
       resetBtn.parentElement.insertBefore(importBtn, resetBtn);
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Mobile layout — single scrollable column, collapsible panel sections
+  // --------------------------------------------------------------------------
+  _buildLayoutMobile(main) {
+    main.style.cssText =
+      'display:block;height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;' +
+      '-webkit-overflow-scrolling:touch;';
+    document.body.classList.add('mobile-layout');
+
+    // Which panels are shown at all (persisted). Only a small default subset is
+    // enabled so each shown panel is large; the rest are added from the manager.
+    let enabled;
+    try { enabled = JSON.parse(localStorage.getItem('cpMobilePanels')); } catch {}
+    if (!Array.isArray(enabled) || !enabled.length) enabled = [...MOBILE_DEFAULT_ENABLED];
+    // Drop any stale ids that no longer exist.
+    const known = new Set(MOBILE_PANELS.map(p => p[0]));
+    this._mobileEnabled = new Set(enabled.filter(id => known.has(id)));
+
+    this._renderMobileLayout(main);
+  }
+
+  _saveMobilePanels() {
+    try {
+      localStorage.setItem('cpMobilePanels', JSON.stringify([...this._mobileEnabled]));
+    } catch {}
+  }
+
+  /** (Re)draw the mobile stack: a discoverable panel-manager chip bar followed
+   *  by one expanded, full-width section per enabled panel. Panels are moved,
+   *  never recreated, so their live canvases and handlers are preserved. */
+  _renderMobileLayout(main) {
+    // Park every panel out of harm's way before clearing, so innerHTML='' can't
+    // destroy a live panel node.
+    for (const [id] of MOBILE_PANELS) {
+      const p = document.getElementById(id);
+      if (p) { document.body.appendChild(p); p.style.display = 'none'; }
+    }
+    main.innerHTML = '';
+
+    // Panel manager — a chip per panel; tap to add/remove. Highlighted = shown.
+    const bar = document.createElement('div');
+    bar.className = 'm-panel-bar';
+    const label = document.createElement('span');
+    label.className = 'm-panel-bar-label';
+    label.textContent = 'Panels:';
+    bar.appendChild(label);
+    for (const [id, name] of MOBILE_PANELS) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'm-panel-chip' + (this._mobileEnabled.has(id) ? ' on' : '');
+      chip.textContent = name;
+      chip.addEventListener('click', () => {
+        const turningOn = !this._mobileEnabled.has(id);
+        if (turningOn) this._mobileEnabled.add(id); else this._mobileEnabled.delete(id);
+        this._saveMobilePanels();
+        this._renderMobileLayout(main);
+        if (turningOn) {
+          const sec = main.querySelector(`.m-section[data-panel-id="${id}"]`);
+          if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+      bar.appendChild(chip);
+    }
+    main.appendChild(bar);
+
+    // One section per enabled panel, in canonical order.
+    for (const [id, name] of MOBILE_PANELS) {
+      if (!this._mobileEnabled.has(id)) continue;
+      const panel = document.getElementById(id);
+      if (!panel) continue;
+      panel.style.display = '';
+
+      const section = document.createElement('div');
+      section.className = 'm-section';
+      section.dataset.panelId = id;
+
+      const header = document.createElement('div');
+      header.className = 'm-section-header';
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'm-section-toggle';
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.innerHTML = `<span class="m-caret">\u25BE</span><span>${name}</span>`;
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'm-section-remove';
+      remove.title = 'Remove this panel';
+      remove.setAttribute('aria-label', `Remove ${name} panel`);
+      remove.textContent = '\u00D7';
+
+      const body = document.createElement('div');
+      body.className = 'm-section-body';
+      body.appendChild(panel);
+
+      toggle.addEventListener('click', () => {
+        const collapsed = body.style.display === 'none';
+        body.style.display = collapsed ? '' : 'none';
+        toggle.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
+        toggle.querySelector('.m-caret').textContent = collapsed ? '\u25BE' : '\u25B8';
+        // Some canvases size themselves to their container on show — nudge them.
+        if (collapsed) window.dispatchEvent(new Event('resize'));
+      });
+      remove.addEventListener('click', () => {
+        this._mobileEnabled.delete(id);
+        this._saveMobilePanels();
+        this._renderMobileLayout(main);
+      });
+
+      header.appendChild(toggle);
+      header.appendChild(remove);
+      section.appendChild(header);
+      section.appendChild(body);
+      main.appendChild(section);
+    }
+
+    // Canvases that measure their container need a nudge after (re)insertion.
+    window.dispatchEvent(new Event('resize'));
   }
 
   _saveLayout() {

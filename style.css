@@ -1691,6 +1691,198 @@ dialog h2 {
   }
 }
 
+/* ==========================================================================
+   MOBILE / TOUCH LAYOUT — single scrollable column of collapsible panels.
+   Activated by JS (body.mobile-layout + .m-section markup) plus this query.
+   ========================================================================== */
+@media (max-width: 820px) {
+  /* Let the toolbar grow to as many rows as it needs; main takes the rest.
+     minmax(0, 1fr) column keeps grid tracks from expanding past the viewport:
+     a grid item's default min-width:auto is its min-content size, so without
+     this the toolbar's widest content could push the whole page out to the
+     right. Pinning the column to the viewport lets the buttons wrap instead. */
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+    height: 100dvh;
+  }
+  /* Wrap the toolbar buttons onto as many rows as needed rather than making
+     them scroll sideways (scrolling is awkward and not discoverable on touch). */
+  #toolbar {
+    height: auto;
+    min-height: var(--toolbar-height);
+    min-width: 0;
+    padding: 6px 8px;
+    padding-top: max(6px, env(safe-area-inset-top, 0px));
+    flex-wrap: wrap;
+  }
+  .toolbar-left { flex-wrap: wrap; gap: 6px; row-gap: 6px; }
+
+  /* Comfortable touch targets; never let a button shrink below its label. */
+  .tool-btn { min-height: 40px; padding: 6px 10px; flex: 0 0 auto; white-space: nowrap; }
+  .small-btn { min-height: 34px; }
+
+  /* Single-column stacked layout injected by _buildLayoutMobile().
+     min-height:0 is what makes this the scroll viewport inside the CSS grid —
+     without it the 1fr row grows to fit content and the page can't scroll. */
+  body.mobile-layout #main-content {
+    display: block;
+    min-height: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Panel manager: strip of chips to add/remove panels. Wraps onto multiple
+     rows rather than scrolling sideways (sideways scroll is awkward and not
+     discoverable on touch). */
+  .m-panel-bar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    row-gap: 6px;
+    padding: 7px 10px;
+    background: linear-gradient(180deg, #191933 0%, #12172e 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .m-panel-bar-label {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-dim, #8888aa);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin-right: 2px;
+  }
+  .m-panel-chip {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-dim, #9999bb);
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-panel-chip.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0c1020;
+    font-weight: 600;
+  }
+
+  .m-section {
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+  }
+  /* Not sticky — the sticky panel-manager bar already provides navigation, and a
+     second sticky element at top:0 would just hide behind it. */
+  .m-section-header {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    border-top: 1px solid var(--border);
+    background: linear-gradient(180deg, #1e1e3a 0%, #16213e 100%);
+  }
+  .m-section-toggle {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-section-remove {
+    flex: 0 0 auto;
+    width: 44px;
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim, #9999bb);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-section-remove:hover { color: #ff6b6b; }
+  .m-section-header .m-caret {
+    color: var(--accent);
+    font-size: 12px;
+    width: 12px;
+    display: inline-block;
+  }
+  .m-section-body {
+    padding: 8px;
+    overflow-x: hidden;
+  }
+
+  /* Let each stacked panel grow to its full content height so the whole page
+     scrolls as one — no cramped inner scroll areas that hide half the panel. */
+  body.mobile-layout .m-section-body #slider-groups,
+  body.mobile-layout .m-section-body #info-content,
+  body.mobile-layout .m-section-body #collection-colors,
+  body.mobile-layout .m-section-body #harmony-container,
+  body.mobile-layout .m-section-body #hexpicker-container {
+    overflow: visible;
+    max-height: none;
+    height: auto;
+    flex: none;
+  }
+
+  /* In the stacked layout these panels must size to content, not to a
+     (now non-existent) full-height flex parent. */
+  body.mobile-layout #panel-picker,
+  body.mobile-layout #panel-3dview {
+    height: auto;
+    overflow: visible;
+  }
+  /* Keep the 3D viewport usable on a phone. The controls row eats ~150px, so
+     give the container enough height that the canvas below it stays large.
+     NOTE: the selector must match/beat the base rule
+     `#panel-3dview > #view3d-container { min-height: 0 }` (2 IDs). Using
+     `body.mobile-layout #panel-3dview > #view3d-container` gives 2 IDs + a class,
+     which wins — otherwise min-height:0 collapses the canvas to a tiny 50px-tall
+     strip and the 3D model renders as a squashed blob. */
+  body.mobile-layout #panel-3dview > #view3d-container {
+    height: auto;
+    min-height: 440px;
+  }
+
+  /* Stop the fixed-size picker canvas + sliders from overflowing narrow screens. */
+  body.mobile-layout #picker-canvas,
+  body.mobile-layout #picker-canvas-container,
+  body.mobile-layout #picker-x-slider,
+  body.mobile-layout #excluded-slider,
+  body.mobile-layout #gradient-bar,
+  body.mobile-layout #triangle-canvas,
+  body.mobile-layout #palette-canvas { max-width: 100%; height: auto; }
+  body.mobile-layout #picker-area { flex-wrap: nowrap; }
+
+  /* Palette editor / space-picker dialog become bottom sheets on phones. */
+  #palette-editor-panel {
+    bottom: 0;
+    max-height: 78vh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #palette-controls { gap: 4px; }
+  #palette-controls .tool-btn { min-height: 36px; }
+  #space-picker-dialog { width: min(94vw, 460px); }
+}
+
 /* High contrast preference */
 @media (prefers-contrast: high) {
   :root {

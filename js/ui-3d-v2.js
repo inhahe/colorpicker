@@ -349,6 +349,8 @@ export class ColorSpace3D {
 
   // Palette trace data
   #tracePoints = null;
+  #showPalette = false;    // whether the palette trace is currently shown
+  #paletteBtn = null;      // the "Palette" toggle button (for highlight sync)
 
   // History trace data (recently picked colors)
   #historyTrace = [];      // array of {xyz: number[]} — XYZ values of last 200 picks
@@ -368,6 +370,8 @@ export class ColorSpace3D {
   #imageRGBs = null;  // Float32Array of [r/255, g/255, b/255, ...] or null
   #imageSRGBs = null; // Uint8Array of [r, g, b, ...] for conversion
   #imageLabel = null;  // HTMLElement showing image name + × button
+  #imageMode = false;  // whether the cloud shows the loaded image (vs full model)
+  #imageBtn = null;    // the "Image" toggle button (enabled only once loaded)
 
   // Subscriptions
   #unsubs = [];
@@ -522,8 +526,11 @@ export class ColorSpace3D {
     imageClearBtn.addEventListener('click', () => {
       this.#imageRGBs = null;
       this.#imageSRGBs = null;
+      this.#imageMode = false;
       imageIndicator.style.display = 'none';
+      this.#updateImageBtn();
       this.#rebuildCloud();
+      if (this.#dualMode) this.#rebuildSecondary();
       this.#markDirty();
     });
     imageIndicator.appendChild(imageNameSpan);
@@ -538,24 +545,54 @@ export class ColorSpace3D {
     const controls = document.createElement('div');
     controls.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;';
 
+    const BTN_STYLE = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
+
+    // "Load Image" — always available; loads/replaces the image and turns the
+    // Image toggle on. "Image" — toggles the loaded image's colors on/off in the
+    // model; disabled (greyed) until an image has been loaded.
+    const loadImgBtn = document.createElement('button');
+    loadImgBtn.textContent = 'Load Image';
+    loadImgBtn.title = 'Load an image to visualize its colors in this color model';
+    loadImgBtn.style.cssText = BTN_STYLE;
+    loadImgBtn.addEventListener('click', () => this.#loadImageDistribution());
+
     const imgBtn = document.createElement('button');
     imgBtn.textContent = 'Image';
-    imgBtn.title = 'Load an image to visualize its color distribution';
-    imgBtn.style.cssText = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
-    imgBtn.addEventListener('click', () => this.#loadImageDistribution());
+    imgBtn.title = 'Show/hide the loaded image\u2019s colors in the model';
+    imgBtn.style.cssText = BTN_STYLE;
+    imgBtn.addEventListener('click', () => {
+      if (!this.#imageSRGBs || this.#imageSRGBs.length === 0) return;
+      this.#imageMode = !this.#imageMode;
+      this.#updateImageBtn();
+      this.#rebuildCloud();
+      if (this.#dualMode) this.#rebuildSecondary();
+      this.#markDirty();
+    });
+    this.#imageBtn = imgBtn;
 
-    // Palette trace button
+    // Palette trace button — toggle: click to show, click again to hide.
     const palBtn = document.createElement('button');
     palBtn.textContent = 'Palette';
-    palBtn.title = 'Show current palette as a 3D trace';
-    palBtn.style.cssText = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
-    palBtn.addEventListener('click', () => this.#showPaletteTrace());
+    palBtn.title = 'Toggle current palette as a 3D trace';
+    palBtn.style.cssText = BTN_STYLE;
+    palBtn.addEventListener('click', () => {
+      if (this.#showPalette) {
+        this.#showPalette = false;
+        this.setTrace(null);
+      } else {
+        this.#showPaletteTrace();
+        // Only latch "on" if there was actually a palette to show.
+        this.#showPalette = !!this.#tracePoints;
+      }
+      this.#updatePaletteBtn();
+    });
+    this.#paletteBtn = palBtn;
 
     // History trace button
     const histBtn = document.createElement('button');
     histBtn.textContent = 'History';
     histBtn.title = 'Toggle color pick history trace in 3D';
-    histBtn.style.cssText = 'font-size:10px;padding:1px 5px;background:#252545;color:#e0e0f0;border:1px solid #3a3a5a;border-radius:2px;cursor:pointer;height:18px;';
+    histBtn.style.cssText = BTN_STYLE;
     histBtn.addEventListener('click', () => {
       this.#showHistoryTrace = !this.#showHistoryTrace;
       histBtn.style.background = this.#showHistoryTrace ? '#3a5a3a' : '#252545';
@@ -617,6 +654,7 @@ export class ColorSpace3D {
     controls.appendChild(sizeWrap);
     controls.appendChild(perspWrap);
     controls.appendChild(stereoSelect);
+    controls.appendChild(loadImgBtn);
     controls.appendChild(imgBtn);
     controls.appendChild(palBtn);
     controls.appendChild(histBtn);
@@ -665,6 +703,11 @@ export class ColorSpace3D {
 
     this.#container.appendChild(root);
     this.#root = root;
+
+    // Initial button states: Image starts disabled/greyed (nothing loaded),
+    // Palette starts un-highlighted (not shown).
+    this.#updateImageBtn();
+    this.#updatePaletteBtn();
   }
 
   // -----------------------------------------------------------------------
@@ -808,8 +851,8 @@ export class ColorSpace3D {
   // -----------------------------------------------------------------------
 
   #rebuildCloud() {
-    // If an image is loaded, re-project it instead of building the regular cloud
-    if (this.#imageSRGBs && this.#imageSRGBs.length > 0) {
+    // In image mode, re-project the loaded image instead of the regular cloud.
+    if (this.#imageMode && this.#imageSRGBs && this.#imageSRGBs.length > 0) {
       this.#projectImageToCloud();
       this.#rebuildWireframe();
       return;
@@ -987,7 +1030,7 @@ export class ColorSpace3D {
 
     // -- Cloud --
     const buildCloud = () => {
-      if (this.#imageSRGBs && this.#imageSRGBs.length > 0) {
+      if (this.#imageMode && this.#imageSRGBs && this.#imageSRGBs.length > 0) {
         // Reproject loaded image into secondary space
         const count = this.#imageSRGBs.length / 3;
         const positions = [];
@@ -1209,6 +1252,34 @@ export class ColorSpace3D {
     this.setTrace(tracePoints);
   }
 
+  /** Sync the "Palette" toggle button's highlight to #showPalette. */
+  #updatePaletteBtn() {
+    const b = this.#paletteBtn;
+    if (!b) return;
+    b.style.background = this.#showPalette ? '#3a5a3a' : '#252545';
+    b.style.borderColor = this.#showPalette ? '#5a8a5a' : '#3a3a5a';
+  }
+
+  /** Sync the "Image" toggle button: disabled/greyed until an image is loaded,
+   *  highlighted while the image distribution is being shown. */
+  #updateImageBtn() {
+    const b = this.#imageBtn;
+    if (!b) return;
+    const hasImage = !!(this.#imageSRGBs && this.#imageSRGBs.length > 0);
+    b.disabled = !hasImage;
+    if (!hasImage) {
+      b.style.background = '#1c1c30';
+      b.style.borderColor = '#2a2a40';
+      b.style.color = '#666680';
+      b.style.cursor = 'default';
+      return;
+    }
+    b.style.color = '#e0e0f0';
+    b.style.cursor = 'pointer';
+    b.style.background = this.#imageMode ? '#3a5a3a' : '#252545';
+    b.style.borderColor = this.#imageMode ? '#5a8a5a' : '#3a3a5a';
+  }
+
   // -----------------------------------------------------------------------
   //  History trace (recently picked colors)
   // -----------------------------------------------------------------------
@@ -1352,8 +1423,12 @@ export class ColorSpace3D {
       this.#imageLabel.container.style.display = 'flex';
     }
 
-    // Project into current space
-    this.#projectImageToCloud();
+    // Loading (or replacing) an image turns image mode on and enables the toggle.
+    this.#imageMode = true;
+    this.#updateImageBtn();
+    this.#rebuildCloud();
+    if (this.#dualMode) this.#rebuildSecondary();
+    this.#markDirty();
   }
 
   /** Re-project stored image pixels into the current 3D space. */

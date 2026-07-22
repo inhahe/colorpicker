@@ -1,4 +1,4 @@
+
 check icc profiles
 
-
-color info doesn't say what the color model is that it's comparing against in the picture
+on mobile, the top bar runs off the right side of the screen.
